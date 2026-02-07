@@ -25,7 +25,7 @@ Backend API server for ShopMunimApp built with **FastAPI** and **MongoDB**.
 ```bash
 # Clone the repository
 git clone https://github.com/your-username/ShopMunim-Backend.git
-cd shopmunimappbackend
+cd Shopmunim-Backend
 
 # Create virtual environment
 python -m venv venv
