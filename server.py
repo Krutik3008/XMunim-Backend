@@ -373,6 +373,10 @@ async def get_users_for_role_assignment(current_user: User = Depends(get_admin_u
     """Get all users for role assignment interface"""
     users = await db.users.find().to_list(length=None)
     
+    # Get all shop owner IDs
+    shops = await db.shops.find({}, {"owner_id": 1}).to_list(length=None)
+    shop_owner_ids = set(shop["owner_id"] for shop in shops)
+    
     users_data = []
     for user in users:
         user_obj = User(**parse_from_mongo(user))
@@ -382,6 +386,7 @@ async def get_users_for_role_assignment(current_user: User = Depends(get_admin_u
             "phone": user_obj.phone,
             "active_role": user_obj.active_role,
             "admin_roles": user_obj.admin_roles,
+            "has_shop": user_obj.id in shop_owner_ids,
             "created_at": user_obj.created_at,
             "verified": user_obj.verified
         })
@@ -420,7 +425,11 @@ async def get_my_shops(current_user: User = Depends(get_current_user)):
 @api_router.get("/shops/{shop_id}/customers", response_model=List[Customer])
 async def get_shop_customers(shop_id: str, current_user: User = Depends(get_current_user)):
     """Get customers for a specific shop"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    query = {"id": shop_id}
+    if current_user.active_role != "admin":
+        query["owner_id"] = current_user.id
+        
+    shop = await db.shops.find_one(query)
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     
@@ -502,7 +511,11 @@ async def create_transaction(shop_id: str, request: TransactionCreateRequest, cu
 @api_router.get("/shops/{shop_id}/transactions", response_model=List[Transaction])
 async def get_shop_transactions(shop_id: str, current_user: User = Depends(get_current_user)):
     """Get transactions for a shop"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    query = {"id": shop_id}
+    if current_user.active_role != "admin":
+        query["owner_id"] = current_user.id
+        
+    shop = await db.shops.find_one(query)
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     
@@ -531,7 +544,11 @@ async def create_product(shop_id: str, request: ProductCreateRequest, current_us
 @api_router.get("/shops/{shop_id}/products", response_model=List[Product])
 async def get_shop_products(shop_id: str, current_user: User = Depends(get_current_user)):
     """Get products for a specific shop"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    query = {"id": shop_id}
+    if current_user.active_role != "admin":
+        query["owner_id"] = current_user.id
+        
+    shop = await db.shops.find_one(query)
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     
@@ -578,7 +595,11 @@ async def delete_product(shop_id: str, product_id: str, current_user: User = Dep
 @api_router.get("/shops/{shop_id}/dashboard")
 async def get_shop_dashboard(shop_id: str, current_user: User = Depends(get_current_user)):
     """Get shop dashboard data"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    query = {"id": shop_id}
+    if current_user.active_role != "admin":
+        query["owner_id"] = current_user.id
+        
+    shop = await db.shops.find_one(query)
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     
@@ -795,6 +816,50 @@ async def get_all_transactions(admin_user: User = Depends(get_admin_user), skip:
     return {
         "transactions": transactions_with_details,
         "total": total_count,
+        "skip": skip,
+        "limit": limit
+    }
+
+@api_router.get("/admin/customers")
+async def get_all_customers(admin_user: User = Depends(get_admin_user), search: Optional[str] = None, skip: int = 0, limit: int = 100):
+    """Get all customers across all shops"""
+    query = {}
+    if search:
+        query = {
+            "$or": [
+                {"name": {"$regex": search, "$options": "i"}},
+                {"phone": {"$regex": search, "$options": "i"}}
+            ]
+        }
+    
+    customers = await db.customers.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(length=None)
+    total_count = await db.customers.count_documents(query)
+    
+    customers_with_details = []
+    for customer in customers:
+        shop = await db.shops.find_one({"id": customer["shop_id"]})
+        customer_data = Customer(**parse_from_mongo(customer)).dict()
+        if shop:
+            customer_data["shop"] = Shop(**parse_from_mongo(shop)).dict()
+            
+        # Enrich with transaction stats
+        # For performance in a real app, this should be an aggregation or stored on customer document
+        # But for this size, we can query.
+        txs = await db.transactions.find({"customer_id": customer["id"], "shop_id": customer["shop_id"]}).sort("date", -1).to_list(length=None)
+        customer_data["total_transactions"] = len(txs)
+        # txs[0]["date"] is already an ISO string in MongoDB, so we use it directly.
+        # If it were a datetime object (from parse_from_mongo), we would need isoformat.
+        # But db.find returns raw dicts.
+        customer_data["last_transaction_date"] = txs[0]["date"] if txs else None
+            
+        customers_with_details.append(customer_data)
+    
+    total_tx_count = await db.transactions.count_documents({})
+
+    return {
+        "customers": customers_with_details,
+        "total": total_count,
+        "total_global_transactions": total_tx_count,
         "skip": skip,
         "limit": limit
     }
