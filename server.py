@@ -146,6 +146,9 @@ class UserVerifyRequest(BaseModel):
     verified: Optional[bool] = None
     flagged: Optional[bool] = None
 
+class UserUpdateRequest(BaseModel):
+    name: Optional[str] = None
+
 # ==================== Helper Functions ====================
 
 def create_token(user_id: str) -> str:
@@ -290,6 +293,21 @@ async def switch_role(request: RoleSwitchRequest, current_user: User = Depends(g
 async def get_current_user_info(current_user: User = Depends(get_current_user)):
     """Get current user information"""
     return current_user
+
+@api_router.put("/auth/me")
+async def update_current_user(request: UserUpdateRequest, current_user: User = Depends(get_current_user)):
+    """Update current user profile"""
+    update_data = {}
+    if request.name is not None:
+        update_data["name"] = request.name
+        
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update data provided")
+        
+    await db.users.update_one({"id": current_user.id}, {"$set": update_data})
+    
+    updated_user = await db.users.find_one({"id": current_user.id})
+    return User(**parse_from_mongo(updated_user))
 
 # ==================== Admin Role Management ====================
 
