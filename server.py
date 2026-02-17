@@ -504,24 +504,36 @@ async def get_shop_customers(shop_id: str, current_user: User = Depends(get_curr
     # Handle "payment"/"debit"
     period_payments = sum(safe_amt(tx) for tx in all_transactions if str(tx.get("type", "")).lower() in ["payment", "debit"])
     
-    # Identify active customers
+    # Identify active customers and calculate period deltas per customer
+    customer_period_deltas = {}
     active_customer_ids = set()
     for tx in all_transactions:
-        cid = tx.get("customer_id")
+        cid = str(tx.get("customer_id", ""))
         if cid:
             active_customer_ids.add(cid)
+            amt = safe_amt(tx)
+            tx_type = str(tx.get("type", "")).lower()
+            
+            if tx_type == "credit":
+                customer_period_deltas[cid] = customer_period_deltas.get(cid, 0) - amt
+            elif tx_type in ["payment", "debit"]:
+                customer_period_deltas[cid] = customer_period_deltas.get(cid, 0) + amt
 
     # Enrichment loop for list cards
     customers_with_details = []
     for customer in customers:
+        c_id = str(customer.get("id", ""))
         # If date filter active, skip customers with no transactions in the range
-        if (from_date or to_date) and customer["id"] not in active_customer_ids:
+        if (from_date or to_date) and c_id not in active_customer_ids:
             continue
 
         customer_data = Customer(**parse_from_mongo(customer)).dict()
         
+        # Add period specific delta
+        customer_data["period_delta"] = customer_period_deltas.get(c_id, 0)
+        
         # Enrich with transaction stats (RESPECT DATE FILTER ON THE CARD TOO)
-        tx_query_card = {"customer_id": customer["id"], "shop_id": shop_id}
+        tx_query_card = {"customer_id": c_id, "shop_id": shop_id}
         if date_filter:
             tx_query_card["date"] = date_filter
             
