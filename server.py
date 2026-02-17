@@ -449,9 +449,9 @@ async def get_my_shops(current_user: User = Depends(get_current_user)):
     shops = await db.shops.find({"owner_id": current_user.id}).to_list(length=None)
     return [Shop(**parse_from_mongo(shop)) for shop in shops]
 
-@api_router.get("/shops/{shop_id}/customers", response_model=List[Customer])
+@api_router.get("/shops/{shop_id}/customers")
 async def get_shop_customers(shop_id: str, current_user: User = Depends(get_current_user)):
-    """Get customers for a specific shop"""
+    """Get customers for a specific shop with enriched transaction data"""
     query = {"id": shop_id}
     if current_user.active_role != "admin":
         query["owner_id"] = current_user.id
@@ -461,7 +461,31 @@ async def get_shop_customers(shop_id: str, current_user: User = Depends(get_curr
         raise HTTPException(status_code=404, detail="Shop not found")
     
     customers = await db.customers.find({"shop_id": shop_id}).to_list(length=None)
-    return [Customer(**parse_from_mongo(customer)) for customer in customers]
+    print(f"[DEBUG] shop_id={shop_id}, customers_found={len(customers)}")
+    
+    customers_with_details = []
+    for customer in customers:
+        customer_data = Customer(**parse_from_mongo(customer)).dict()
+        
+        # Enrich with transaction stats
+        txs = await db.transactions.find({"customer_id": customer["id"], "shop_id": shop_id}).sort("date", -1).to_list(length=None)
+        customer_data["total_transactions"] = len(txs)
+        customer_data["last_transaction_date"] = txs[0]["date"] if txs else None
+        
+        customers_with_details.append(customer_data)
+    
+    # Compute shop-level stats from actual transaction data
+    all_transactions = await db.transactions.find({"shop_id": shop_id}).to_list(length=None)
+    total_amount = sum(tx.get("amount", 0) for tx in all_transactions)
+    total_dues = sum(abs(c.get("balance", 0)) for c in customers if c.get("balance", 0) < 0)
+    print(f"[DEBUG] transactions_found={len(all_transactions)}, total_amount={total_amount}, total_dues={total_dues}")
+    
+    return {
+        "customers": customers_with_details,
+        "total_amount": total_amount,
+        "total_dues": total_dues,
+        "total_transactions": len(all_transactions)
+    }
 
 @api_router.post("/shops/{shop_id}/customers", response_model=Customer)
 async def add_customer(shop_id: str, request: CustomerCreateRequest, current_user: User = Depends(get_current_user)):
