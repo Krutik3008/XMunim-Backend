@@ -304,7 +304,16 @@ async def update_current_user(request: UserUpdateRequest, current_user: User = D
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
         
+    # Update User Profile
     await db.users.update_one({"id": current_user.id}, {"$set": update_data})
+    
+    # Also update any customer records associated with this phone number
+    # This keeps the user's name consistent across all shops where they are listed
+    if "name" in update_data:
+        await db.customers.update_many(
+            {"phone": current_user.phone},
+            {"$set": {"name": update_data["name"]}}
+        )
     
     updated_user = await db.users.find_one({"id": current_user.id})
     return User(**parse_from_mongo(updated_user))
