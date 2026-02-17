@@ -450,7 +450,7 @@ async def get_my_shops(current_user: User = Depends(get_current_user)):
     return [Shop(**parse_from_mongo(shop)) for shop in shops]
 
 @api_router.get("/shops/{shop_id}/customers")
-async def get_shop_customers(shop_id: str, current_user: User = Depends(get_current_user)):
+async def get_shop_customers(shop_id: str, current_user: User = Depends(get_current_user), from_date: Optional[str] = None, to_date: Optional[str] = None):
     """Get customers for a specific shop with enriched transaction data"""
     query = {"id": shop_id}
     if current_user.active_role != "admin":
@@ -461,29 +461,90 @@ async def get_shop_customers(shop_id: str, current_user: User = Depends(get_curr
         raise HTTPException(status_code=404, detail="Shop not found")
     
     customers = await db.customers.find({"shop_id": shop_id}).to_list(length=None)
-    print(f"[DEBUG] shop_id={shop_id}, customers_found={len(customers)}")
+    print(f"[DEBUG] Shop: {shop_id}, Found {len(customers)} customers")
     
+    # All-time stats for the summary cards
+    total_customers_count = len(customers)
+    all_time_with_dues_count = 0
+    all_time_total_dues = 0
+    for c in customers:
+        bal = c.get("balance", 0)
+        if bal < 0:
+            all_time_with_dues_count += 1
+            all_time_total_dues += abs(bal)
+    
+    print(f"[DEBUG] All-time Dues: {all_time_with_dues_count} customers, Total ₹{all_time_total_dues}")
+
+    # Date Filter setup
+    tx_query = {"shop_id": shop_id}
+    date_filter = None
+    if from_date or to_date:
+        date_filter = {}
+        if from_date:
+            date_filter["$gte"] = from_date
+        if to_date:
+            # Append T23:59:59.999 to be inclusive of the entire day
+            date_filter["$lte"] = to_date + "T23:59:59.999"
+        tx_query["date"] = date_filter
+    
+    # Period-specific stats
+    all_transactions = await db.transactions.find(tx_query).to_list(length=None)
+    print(f"[DEBUG] tx_query: {tx_query}, Found {len(all_transactions)} transactions")
+    
+    # Use float() to ensure numerical sums even if stored as strings (though they should be floats)
+    def safe_amt(tx):
+        try:
+            return float(tx.get("amount", 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    period_amount = sum(safe_amt(tx) for tx in all_transactions)
+    # Handle "credit"/sales
+    period_sales = sum(safe_amt(tx) for tx in all_transactions if str(tx.get("type", "")).lower() == "credit")
+    # Handle "payment"/"debit"
+    period_payments = sum(safe_amt(tx) for tx in all_transactions if str(tx.get("type", "")).lower() in ["payment", "debit"])
+    
+    # Identify active customers
+    active_customer_ids = set()
+    for tx in all_transactions:
+        cid = tx.get("customer_id")
+        if cid:
+            active_customer_ids.add(cid)
+
+    # Enrichment loop for list cards
     customers_with_details = []
     for customer in customers:
+        # If date filter active, skip customers with no transactions in the range
+        if (from_date or to_date) and customer["id"] not in active_customer_ids:
+            continue
+
         customer_data = Customer(**parse_from_mongo(customer)).dict()
         
-        # Enrich with transaction stats
-        txs = await db.transactions.find({"customer_id": customer["id"], "shop_id": shop_id}).sort("date", -1).to_list(length=None)
-        customer_data["total_transactions"] = len(txs)
-        customer_data["last_transaction_date"] = txs[0]["date"] if txs else None
+        # Enrich with transaction stats (RESPECT DATE FILTER ON THE CARD TOO)
+        tx_query_card = {"customer_id": customer["id"], "shop_id": shop_id}
+        if date_filter:
+            tx_query_card["date"] = date_filter
+            
+        txs_card = await db.transactions.find(tx_query_card).sort("date", -1).to_list(length=None)
+        customer_data["total_transactions"] = len(txs_card)
+        customer_data["last_transaction_date"] = txs_card[0]["date"] if txs_card else None
         
         customers_with_details.append(customer_data)
     
-    # Compute shop-level stats from actual transaction data
-    all_transactions = await db.transactions.find({"shop_id": shop_id}).to_list(length=None)
-    total_amount = sum(tx.get("amount", 0) for tx in all_transactions)
-    total_dues = sum(abs(c.get("balance", 0)) for c in customers if c.get("balance", 0) < 0)
-    print(f"[DEBUG] transactions_found={len(all_transactions)}, total_amount={total_amount}, total_dues={total_dues}")
-    
     return {
         "customers": customers_with_details,
-        "total_amount": total_amount,
-        "total_dues": total_dues,
+        "total_customers": total_customers_count,
+        "all_time_with_dues": all_time_with_dues_count,
+        "all_time_total_dues": all_time_total_dues,
+        "period_sales": period_sales,
+        "period_payments": period_payments,
+        "period_transactions": len(all_transactions),
+        "period_active_customers": len(active_customer_ids),
+        # Backward compatibility fields
+        "total_amount": period_amount,
+        "total_sales": period_sales,
+        "total_dues": all_time_total_dues,
+        "with_dues": all_time_with_dues_count,
         "total_transactions": len(all_transactions)
     }
 
