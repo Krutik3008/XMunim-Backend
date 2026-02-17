@@ -52,7 +52,6 @@ MONGO_URL=mongodb://localhost:27017
 DB_NAME=shopmunim_app
 ```
 
-
 ---
 
 ## ▶️ Run Server
