@@ -59,6 +59,7 @@ class Customer(BaseModel):
     shop_id: str
     name: str
     phone: str
+    nickname: Optional[str] = None
     balance: float = 0.0  # negative means customer owes money
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -81,10 +82,10 @@ class Transaction(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     shop_id: str
     customer_id: str
-    type: str  # "credit" or "payment"
+    type: str  # "credit" (udhaar) or "debit" (jama)
     amount: float
-    products: List[TransactionProduct] = []
-    note: str = ""
+    products: Optional[List[TransactionProduct]] = None
+    note: Optional[str] = None
     date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -121,6 +122,7 @@ class ShopCreateRequest(BaseModel):
 class CustomerCreateRequest(BaseModel):
     name: str
     phone: str
+    nickname: Optional[str] = None
 
 class ProductCreateRequest(BaseModel):
     name: str
@@ -141,6 +143,11 @@ class TransactionCreateRequest(BaseModel):
     amount: Optional[float] = None
     products: List[TransactionProductRequest] = []
     note: str = ""
+
+class CustomerUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    nickname: Optional[str] = None
 
 class UserVerifyRequest(BaseModel):
     verified: Optional[bool] = None
@@ -574,12 +581,44 @@ async def add_customer(shop_id: str, request: CustomerCreateRequest, current_use
     customer = Customer(
         shop_id=shop_id,
         name=request.name,
-        phone=request.phone
+        phone=request.phone,
+        nickname=request.nickname
     )
+    
     
     customer_dict = prepare_for_mongo(customer.dict())
     await db.customers.insert_one(customer_dict)
     return customer
+
+@api_router.put("/shops/{shop_id}/customers/{customer_id}", response_model=Customer)
+async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdateRequest, current_user: User = Depends(get_current_user)):
+    """Update customer details"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    update_data = {}
+    if request.name is not None:
+        update_data["name"] = request.name
+    if request.phone is not None:
+        update_data["phone"] = request.phone
+    if request.nickname is not None:
+        update_data["nickname"] = request.nickname
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update data provided")
+
+    await db.customers.update_one(
+        {"id": customer_id, "shop_id": shop_id},
+        {"$set": update_data}
+    )
+
+    updated_customer = await db.customers.find_one({"id": customer_id})
+    return Customer(**parse_from_mongo(updated_customer))
 
 @api_router.post("/shops/{shop_id}/transactions", response_model=Transaction)
 async def create_transaction(shop_id: str, request: TransactionCreateRequest, current_user: User = Depends(get_current_user)):
