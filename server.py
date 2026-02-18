@@ -483,8 +483,12 @@ async def get_shop_customers(shop_id: str, current_user: User = Depends(get_curr
         if from_date:
             date_filter["$gte"] = from_date
         if to_date:
-            # Append T23:59:59.999 to be inclusive of the entire day
-            date_filter["$lte"] = to_date + "T23:59:59.999"
+            # If to_date is already an ISO string (contains 'T'), use it as is
+            # Otherwise, append T23:59:59.999 for YYYY-MM-DD format
+            if 'T' in to_date:
+                date_filter["$lte"] = to_date
+            else:
+                date_filter["$lte"] = to_date + "T23:59:59.999"
         tx_query["date"] = date_filter
     
     # Period-specific stats
