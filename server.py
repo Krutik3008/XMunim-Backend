@@ -876,6 +876,8 @@ async def get_admin_dashboard(admin_user: User = Depends(get_admin_user)):
     
     all_transactions = await db.transactions.find({}).to_list(length=None)
     total_amount = sum(t.get("amount", 0) for t in all_transactions)
+    # Calculate total sales (only credit transactions)
+    total_sales = sum(t.get("amount", 0) for t in all_transactions if str(t.get("type", "")).lower() == "credit")
     
     seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
     new_users_count = await db.users.count_documents({"created_at": {"$gte": seven_days_ago}})
@@ -890,6 +892,7 @@ async def get_admin_dashboard(admin_user: User = Depends(get_admin_user)):
             "amount": daily_transactions_amount
         },
         "total_amount": total_amount,
+        "total_sales": total_sales,
         "new_users_this_week": new_users_count
     }
 
