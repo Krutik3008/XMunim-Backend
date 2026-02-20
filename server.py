@@ -49,7 +49,12 @@ class Shop(BaseModel):
     owner_id: str
     name: str
     category: str
-    location: str
+    pincode: Optional[str] = None
+    city: Optional[str] = None
+    area: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    location: Optional[str] = None
     gst_number: Optional[str] = None
     shop_code: str = Field(default_factory=lambda: ''.join(random.choices(string.ascii_uppercase + string.digits, k=8)))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -116,7 +121,12 @@ class JoinShopRequest(BaseModel):
 class ShopCreateRequest(BaseModel):
     name: str
     category: str
-    location: str
+    pincode: str
+    city: str
+    area: str
+    state: str
+    country: str
+    location: Optional[str] = None
     gst_number: Optional[str] = None
 
 class CustomerCreateRequest(BaseModel):
@@ -442,6 +452,11 @@ async def create_shop(request: ShopCreateRequest, current_user: User = Depends(g
         owner_id=current_user.id,
         name=request.name,
         category=request.category,
+        pincode=request.pincode,
+        city=request.city,
+        area=request.area,
+        state=request.state,
+        country=request.country,
         location=request.location,
         gst_number=request.gst_number
     )
