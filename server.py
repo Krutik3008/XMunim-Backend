@@ -129,6 +129,17 @@ class ShopCreateRequest(BaseModel):
     location: Optional[str] = None
     gst_number: Optional[str] = None
 
+class ShopUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    pincode: Optional[str] = None
+    city: Optional[str] = None
+    area: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    location: Optional[str] = None
+    gst_number: Optional[str] = None
+
 class CustomerCreateRequest(BaseModel):
     name: str
     phone: str
@@ -470,6 +481,24 @@ async def get_my_shops(current_user: User = Depends(get_current_user)):
     """Get shops owned by current user"""
     shops = await db.shops.find({"owner_id": current_user.id}).to_list(length=None)
     return [Shop(**parse_from_mongo(shop)) for shop in shops]
+
+@api_router.put("/shops/{shop_id}", response_model=Shop)
+async def update_shop(shop_id: str, request: ShopUpdateRequest, current_user: User = Depends(get_current_user)):
+    """Update shop details"""
+    # Verify ownership
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    update_data = {k: v for k, v in request.dict().items() if v is not None}
+    
+    if not update_data:
+         raise HTTPException(status_code=400, detail="No update data provided")
+
+    await db.shops.update_one({"id": shop_id}, {"$set": update_data})
+    
+    updated_shop = await db.shops.find_one({"id": shop_id})
+    return Shop(**parse_from_mongo(updated_shop))
 
 @api_router.get("/shops/{shop_id}/customers")
 async def get_shop_customers(shop_id: str, current_user: User = Depends(get_current_user), from_date: Optional[str] = None, to_date: Optional[str] = None):
