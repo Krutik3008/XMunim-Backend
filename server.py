@@ -213,7 +213,7 @@ async def get_admin_user(current_user: User = Depends(get_current_user)):
     has_admin_access = (
         current_user.active_role == "admin" and
         ("admin" in current_user.admin_roles or "super_admin" in current_user.admin_roles)
-    ) or current_user.phone in ["9999999999", "8888888888"]
+    )
     
     if not has_admin_access:
         raise HTTPException(status_code=403, detail="Admin access required")
@@ -264,27 +264,10 @@ async def verify_otp(request: OTPVerifyRequest):
     user_data = await db.users.find_one({"phone": request.phone})
     if not user_data:
         user = User(phone=request.phone, name=request.name or "User")
-        
-        # Auto-promote hardcoded admin phones
-        if request.phone in ["9999999999", "8888888888"]:
-            super_admin_count = await db.users.count_documents({"admin_roles": "super_admin"})
-            if super_admin_count == 0:
-                user.admin_roles = ["super_admin", "admin"]
-        
         user_dict = prepare_for_mongo(user.dict())
         await db.users.insert_one(user_dict)
     else:
         user = User(**parse_from_mongo(user_data))
-        
-        if request.phone in ["9999999999", "8888888888"]:
-            super_admin_count = await db.users.count_documents({"admin_roles": "super_admin"})
-            if super_admin_count == 0 and "super_admin" not in user.admin_roles:
-                new_admin_roles = ["super_admin", "admin"]
-                await db.users.update_one(
-                    {"id": user.id},
-                    {"$set": {"admin_roles": new_admin_roles}}
-                )
-                user.admin_roles = new_admin_roles
     
     await db.otps.delete_many({"phone": request.phone})
     token = create_token(user.id)
@@ -303,10 +286,8 @@ async def switch_role(request: RoleSwitchRequest, current_user: User = Depends(g
     
     if request.role == "admin":
         has_admin_access = "admin" in current_user.admin_roles or "super_admin" in current_user.admin_roles
-        hardcoded_admin_phones = ["9999999999", "8888888888"]
-        is_hardcoded_admin = current_user.phone in hardcoded_admin_phones
         
-        if not has_admin_access and not is_hardcoded_admin:
+        if not has_admin_access:
             raise HTTPException(status_code=403, detail="Admin access not authorized")
     
     await db.users.update_one(
@@ -358,8 +339,8 @@ async def assign_user_role(request: AssignRoleRequest, current_user: User = Depe
     if invalid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid roles: {invalid_roles}")
     
-    if "super_admin" in request.admin_roles and not can_assign_admin:
-        raise HTTPException(status_code=403, detail="Only super admin can assign super admin role")
+    if not can_assign_admin:
+        raise HTTPException(status_code=403, detail="Only super admin can manage admin roles")
     
     target_user = await db.users.find_one({"id": request.user_id})
     if not target_user:
@@ -394,12 +375,9 @@ async def assign_user_role(request: AssignRoleRequest, current_user: User = Depe
 @api_router.post("/admin/promote-to-super-admin/{user_id}")
 async def promote_to_super_admin(user_id: str, current_user: User = Depends(get_admin_user)):
     """Promote a user to super admin"""
-    super_admin_count = await db.users.count_documents({"admin_roles": "super_admin"})
-    
     is_super_admin = "super_admin" in current_user.admin_roles
-    is_hardcoded_admin = current_user.phone in ["9999999999", "8888888888"]
     
-    if not is_super_admin and not (super_admin_count == 0 and is_hardcoded_admin):
+    if not is_super_admin:
         raise HTTPException(
             status_code=403,
             detail="Only super admin can promote users"

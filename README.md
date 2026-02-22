@@ -112,7 +112,8 @@ Swagger UI Documentation: `http://localhost:8000/docs`
 The system uses role-based access control (RBAC):
 - **Customer**: Default role on registration.
 - **Shop Owner**: Users who have created at least one shop.
-- **Admin / Super Admin**: Users with elevated permissions, granted via the Assign Role endpoint.
+- **Admin**: Can access the admin panel, view users, shops, and transactions, but **cannot** manage user roles.
+- **Super Admin**: Full system access, including the ability to grant or revoke Admin/Super Admin roles.
 
 ---
 
