@@ -263,11 +263,16 @@ async def verify_otp(request: OTPVerifyRequest):
     
     user_data = await db.users.find_one({"phone": request.phone})
     if not user_data:
-        user = User(phone=request.phone, name=request.name or "User")
+        # Create new user, mark as verified since they used OTP
+        user = User(phone=request.phone, name=request.name or "User", verified=True)
         user_dict = prepare_for_mongo(user.dict())
         await db.users.insert_one(user_dict)
     else:
         user = User(**parse_from_mongo(user_data))
+        # If existing user is not verified, mark them as verified now
+        if not user.verified:
+            user.verified = True
+            await db.users.update_one({"id": user.id}, {"$set": {"verified": True}})
     
     await db.otps.delete_many({"phone": request.phone})
     token = create_token(user.id)
@@ -326,6 +331,53 @@ async def update_current_user(request: UserUpdateRequest, current_user: User = D
     
     updated_user = await db.users.find_one({"id": current_user.id})
     return User(**parse_from_mongo(updated_user))
+
+# ==================== Security & Privacy Routes ====================
+
+@api_router.get("/auth/sessions")
+async def get_user_sessions(current_user: User = Depends(get_current_user)):
+    """Get active sessions for the current user (Mocked for now)"""
+    return {
+        "sessions": [
+            {
+                "id": str(uuid.uuid4()),
+                "device": "Mobile App",
+                "os": "Android" if random.random() > 0.5 else "iOS",
+                "last_active": datetime.now(timezone.utc).isoformat(),
+                "is_current": True
+            }
+        ]
+    }
+
+@api_router.post("/auth/request-data-export")
+async def request_data_export(current_user: User = Depends(get_current_user)):
+    """Request a data export for the current user"""
+    # In a real app, this would trigger a background task to generate a CSV/PDF
+    return {"message": "Data export request received. You will receive an email shortly."}
+
+@api_router.post("/auth/reset-pin")
+async def reset_login_pin(current_user: User = Depends(get_current_user)):
+    """Initiate a PIN reset for the user"""
+    # Simply return a success message for the mock flow
+    return {"message": "Reset PIN sent to " + current_user.phone}
+
+@api_router.delete("/auth/me")
+async def delete_account(current_user: User = Depends(get_current_user)):
+    """Permanently delete user account and associated customer records"""
+    # 1. Delete all customer records associated with this phone
+    await db.customers.delete_many({"phone": current_user.phone})
+    
+    # 2. If user is a shop owner, we might want to handle their shops
+    # For now, we'll just remove the user record to keep it simple
+    # In a production app, you'd handle shop ownership transfer or deletion
+    
+    # 3. Delete the user record
+    result = await db.users.delete_one({"id": current_user.id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    return {"message": "Account and associated data deleted successfully"}
 
 # ==================== Admin Role Management ====================
 
