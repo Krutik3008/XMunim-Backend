@@ -181,7 +181,7 @@ class UserUpdateRequest(BaseModel):
 
 def create_token(user_id: str) -> str:
     now = datetime.now(timezone.utc)
-    expiry = now.timestamp() + (24 * 60 * 60)  # 24 hours
+    expiry = now.timestamp() + (30 * 24 * 60 * 60)  # 30 days
     payload = {
         "user_id": user_id,
         "exp": int(expiry),
