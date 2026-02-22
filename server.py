@@ -42,6 +42,7 @@ class User(BaseModel):
     admin_roles: List[str] = []  # List of admin roles: ["admin", "super_admin"]
     verified: bool = False
     flagged: bool = False
+    profile_photo: Optional[str] = None  # Base64-encoded profile photo
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Shop(BaseModel):
@@ -176,6 +177,9 @@ class UserVerifyRequest(BaseModel):
 
 class UserUpdateRequest(BaseModel):
     name: Optional[str] = None
+
+class ProfilePhotoRequest(BaseModel):
+    photo: str  # Base64-encoded image string
 
 # ==================== Helper Functions ====================
 
@@ -331,6 +335,35 @@ async def update_current_user(request: UserUpdateRequest, current_user: User = D
     
     updated_user = await db.users.find_one({"id": current_user.id})
     return User(**parse_from_mongo(updated_user))
+
+@api_router.post("/auth/me/photo")
+async def upload_profile_photo(request: ProfilePhotoRequest, current_user: User = Depends(get_current_user)):
+    """Upload/update profile photo (base64 encoded)"""
+    if not request.photo:
+        raise HTTPException(status_code=400, detail="No photo data provided")
+    
+    # Validate base64 size (limit ~5MB of base64 data)
+    if len(request.photo) > 7_000_000:
+        raise HTTPException(status_code=400, detail="Photo is too large. Maximum size is 5MB.")
+    
+    await db.users.update_one(
+        {"id": current_user.id},
+        {"$set": {"profile_photo": request.photo}}
+    )
+    
+    updated_user = await db.users.find_one({"id": current_user.id})
+    return {"user": User(**parse_from_mongo(updated_user)).dict(), "message": "Profile photo updated successfully"}
+
+@api_router.delete("/auth/me/photo")
+async def remove_profile_photo(current_user: User = Depends(get_current_user)):
+    """Remove current user's profile photo"""
+    await db.users.update_one(
+        {"id": current_user.id},
+        {"$unset": {"profile_photo": ""}}
+    )
+    
+    updated_user = await db.users.find_one({"id": current_user.id})
+    return {"user": User(**parse_from_mongo(updated_user)).dict(), "message": "Profile photo removed successfully"}
 
 # ==================== Security & Privacy Routes ====================
 
