@@ -252,6 +252,11 @@ async def send_otp(request: AuthRequest):
         user_exists = await db.users.find_one({"phone": request.phone})
         if not user_exists:
             raise HTTPException(status_code=404, detail="User not found. Please sign up first.")
+        
+        # Check if name matches (case-insensitive)
+        if request.name and user_exists.get('name'):
+            if request.name.strip().lower() != user_exists.get('name').strip().lower():
+                raise HTTPException(status_code=401, detail="Phone number and name not match")
 
     mock_otp = "123456"
     
