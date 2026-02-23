@@ -101,6 +101,7 @@ class Transaction(BaseModel):
 class AuthRequest(BaseModel):
     phone: str
     name: Optional[str] = None
+    is_login: bool = False
 
 class OTPVerifyRequest(BaseModel):
     phone: str
@@ -247,6 +248,11 @@ def parse_from_mongo(item):
 @api_router.post("/auth/send-otp")
 async def send_otp(request: AuthRequest):
     """Send OTP to phone number (mocked for MVP)"""
+    if request.is_login:
+        user_exists = await db.users.find_one({"phone": request.phone})
+        if not user_exists:
+            raise HTTPException(status_code=404, detail="User not found. Please sign up first.")
+
     mock_otp = "123456"
     
     await db.otps.delete_many({"phone": request.phone})
