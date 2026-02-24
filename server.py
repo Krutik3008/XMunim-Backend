@@ -255,7 +255,7 @@ async def send_otp(request: AuthRequest):
             "name": {"$regex": f"^{request.name}$", "$options": "i"}
         })
         if not user_exists:
-            raise HTTPException(status_code=404, detail="User not found with this name and phone.")
+            raise HTTPException(status_code=404, detail="User does not exist")
     else:
         # Check if user with same phone AND same name already exists (case-insensitive)
         if not request.name:
