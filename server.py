@@ -57,6 +57,7 @@ class Shop(BaseModel):
     country: Optional[str] = None
     location: Optional[str] = None
     gst_number: Optional[str] = None
+    upi_id: Optional[str] = None
     shop_code: str = Field(default_factory=lambda: ''.join(random.choices(string.ascii_uppercase + string.digits, k=8)))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -130,6 +131,7 @@ class ShopCreateRequest(BaseModel):
     country: str
     location: Optional[str] = None
     gst_number: Optional[str] = None
+    upi_id: Optional[str] = None
 
 class ShopUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -141,6 +143,7 @@ class ShopUpdateRequest(BaseModel):
     country: Optional[str] = None
     location: Optional[str] = None
     gst_number: Optional[str] = None
+    upi_id: Optional[str] = None
 
 class CustomerCreateRequest(BaseModel):
     name: str
