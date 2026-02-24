@@ -343,6 +343,16 @@ async def update_current_user(request: UserUpdateRequest, current_user: User = D
     """Update current user profile"""
     update_data = {}
     if request.name is not None:
+        # Check if the name is actually changing
+        if request.name.strip().lower() != current_user.name.strip().lower():
+            # Check if another user with same phone AND new name already exists
+            user_exists = await db.users.find_one({
+                "phone": current_user.phone,
+                "name": {"$regex": f"^{request.name}$", "$options": "i"}
+            })
+            if user_exists:
+                raise HTTPException(status_code=400, detail="User already exists")
+        
         update_data["name"] = request.name
         
     if not update_data:
@@ -423,8 +433,8 @@ async def reset_login_pin(current_user: User = Depends(get_current_user)):
 @api_router.delete("/auth/me")
 async def delete_account(current_user: User = Depends(get_current_user)):
     """Permanently delete user account and associated customer records"""
-    # 1. Delete all customer records associated with this phone
-    await db.customers.delete_many({"phone": current_user.phone})
+    # 1. Delete all customer records associated with this phone AND name
+    await db.customers.delete_many({"phone": current_user.phone, "name": current_user.name})
     
     # 2. If user is a shop owner, we might want to handle their shops
     # For now, we'll just remove the user record to keep it simple
