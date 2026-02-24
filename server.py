@@ -249,14 +249,24 @@ def parse_from_mongo(item):
 async def send_otp(request: AuthRequest):
     """Send OTP to phone number (mocked for MVP)"""
     if request.is_login:
-        user_exists = await db.users.find_one({"phone": request.phone})
+        # Search for user with same phone and name (case-insensitive)
+        user_exists = await db.users.find_one({
+            "phone": request.phone,
+            "name": {"$regex": f"^{request.name}$", "$options": "i"}
+        })
         if not user_exists:
-            raise HTTPException(status_code=404, detail="User not found. Please sign up first.")
-        
-        # Check if name matches (case-insensitive)
-        if request.name and user_exists.get('name'):
-            if request.name.strip().lower() != user_exists.get('name').strip().lower():
-                raise HTTPException(status_code=401, detail="Phone number and name not match")
+            raise HTTPException(status_code=404, detail="User not found with this name and phone.")
+    else:
+        # Check if user with same phone AND same name already exists (case-insensitive)
+        if not request.name:
+            raise HTTPException(status_code=400, detail="Name is required for sign up")
+            
+        user_exists = await db.users.find_one({
+            "phone": request.phone,
+            "name": {"$regex": f"^{request.name}$", "$options": "i"}
+        })
+        if user_exists:
+            raise HTTPException(status_code=400, detail="User already exists")
 
     mock_otp = "123456"
     
@@ -276,7 +286,12 @@ async def verify_otp(request: OTPVerifyRequest):
     if not otp_record:
         raise HTTPException(status_code=400, detail="Invalid OTP")
     
-    user_data = await db.users.find_one({"phone": request.phone})
+    # Search for user with same phone AND name (case-insensitive)
+    user_data = await db.users.find_one({
+        "phone": request.phone,
+        "name": {"$regex": f"^{request.name}$", "$options": "i"}
+    })
+    
     if not user_data:
         # Create new user, mark as verified since they used OTP
         user = User(phone=request.phone, name=request.name or "User", verified=True)
@@ -336,11 +351,11 @@ async def update_current_user(request: UserUpdateRequest, current_user: User = D
     # Update User Profile
     await db.users.update_one({"id": current_user.id}, {"$set": update_data})
     
-    # Also update any customer records associated with this phone number
-    # This keeps the user's name consistent across all shops where they are listed
+    # Also update any customer records associated with this phone number AND current name
+    # This ensures we don't accidentally update names for other users sharing the same phone
     if "name" in update_data:
         await db.customers.update_many(
-            {"phone": current_user.phone},
+            {"phone": current_user.phone, "name": current_user.name},
             {"$set": {"name": update_data["name"]}}
         )
     
@@ -911,7 +926,11 @@ async def get_customer_ledger(current_user: User = Depends(get_current_user)):
     if current_user.active_role != "customer":
         raise HTTPException(status_code=403, detail="Only customers can view ledger")
     
-    customers = await db.customers.find({"phone": current_user.phone}).to_list(length=None)
+    # Filter customers by BOTH phone and name (case-insensitive) to ensure data isolation
+    customers = await db.customers.find({
+        "phone": current_user.phone,
+        "name": {"$regex": f"^{current_user.name}$", "$options": "i"}
+    }).to_list(length=None)
     
     ledger_data = []
     for customer in customers:
@@ -954,7 +973,8 @@ async def connect_to_shop_public(shop_code: str, customer_data: dict):
     
     existing_customer = await db.customers.find_one({
         "shop_id": shop["id"],
-        "phone": customer_data["phone"]
+        "phone": customer_data["phone"],
+        "name": {"$regex": f"^{customer_data['name']}$", "$options": "i"}
     })
     
     if existing_customer:
