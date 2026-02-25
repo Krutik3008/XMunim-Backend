@@ -42,6 +42,7 @@ class User(BaseModel):
     admin_roles: List[str] = []  # List of admin roles: ["admin", "super_admin"]
     verified: bool = False
     flagged: bool = False
+    terms_accepted: bool = False  # Terms of Services & Privacy Policy acceptance
     profile_photo: Optional[str] = None  # Base64-encoded profile photo
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -103,11 +104,13 @@ class AuthRequest(BaseModel):
     phone: str
     name: Optional[str] = None
     is_login: bool = False
+    terms_accepted: bool = False
 
 class OTPVerifyRequest(BaseModel):
     phone: str
     otp: str
     name: Optional[str] = None
+    terms_accepted: bool = False
 
 class RoleSwitchRequest(BaseModel):
     role: str
@@ -252,24 +255,18 @@ def parse_from_mongo(item):
 async def send_otp(request: AuthRequest):
     """Send OTP to phone number (mocked for MVP)"""
     if request.is_login:
-        # Search for user with same phone and name (case-insensitive)
-        user_exists = await db.users.find_one({
-            "phone": request.phone,
-            "name": {"$regex": f"^{request.name}$", "$options": "i"}
-        })
+        # Search for user with same phone number
+        user_exists = await db.users.find_one({"phone": request.phone})
         if not user_exists:
             raise HTTPException(status_code=404, detail="User does not exist")
     else:
-        # Check if user with same phone AND same name already exists (case-insensitive)
+        # Check if user with same phone already exists
         if not request.name:
             raise HTTPException(status_code=400, detail="Name is required for sign up")
             
-        user_exists = await db.users.find_one({
-            "phone": request.phone,
-            "name": {"$regex": f"^{request.name}$", "$options": "i"}
-        })
+        user_exists = await db.users.find_one({"phone": request.phone})
         if user_exists:
-            raise HTTPException(status_code=400, detail="User already exists")
+            raise HTTPException(status_code=400, detail="Phone number already registered.")
 
     mock_otp = "123456"
     
@@ -289,15 +286,12 @@ async def verify_otp(request: OTPVerifyRequest):
     if not otp_record:
         raise HTTPException(status_code=400, detail="Invalid OTP")
     
-    # Search for user with same phone AND name (case-insensitive)
-    user_data = await db.users.find_one({
-        "phone": request.phone,
-        "name": {"$regex": f"^{request.name}$", "$options": "i"}
-    })
+    # Search for user by phone number only
+    user_data = await db.users.find_one({"phone": request.phone})
     
     if not user_data:
         # Create new user, mark as verified since they used OTP
-        user = User(phone=request.phone, name=request.name or "User", verified=True)
+        user = User(phone=request.phone, name=request.name or "User", verified=True, terms_accepted=request.terms_accepted)
         user_dict = prepare_for_mongo(user.dict())
         await db.users.insert_one(user_dict)
     else:
@@ -346,16 +340,6 @@ async def update_current_user(request: UserUpdateRequest, current_user: User = D
     """Update current user profile"""
     update_data = {}
     if request.name is not None:
-        # Check if the name is actually changing
-        if request.name.strip().lower() != current_user.name.strip().lower():
-            # Check if another user with same phone AND new name already exists
-            user_exists = await db.users.find_one({
-                "phone": current_user.phone,
-                "name": {"$regex": f"^{request.name}$", "$options": "i"}
-            })
-            if user_exists:
-                raise HTTPException(status_code=400, detail="User already exists")
-        
         update_data["name"] = request.name
         
     if not update_data:
@@ -364,11 +348,10 @@ async def update_current_user(request: UserUpdateRequest, current_user: User = D
     # Update User Profile
     await db.users.update_one({"id": current_user.id}, {"$set": update_data})
     
-    # Also update any customer records associated with this phone number AND current name
-    # This ensures we don't accidentally update names for other users sharing the same phone
+    # Also update any customer records associated with this phone number
     if "name" in update_data:
         await db.customers.update_many(
-            {"phone": current_user.phone, "name": current_user.name},
+            {"phone": current_user.phone},
             {"$set": {"name": update_data["name"]}}
         )
     
@@ -436,8 +419,8 @@ async def reset_login_pin(current_user: User = Depends(get_current_user)):
 @api_router.delete("/auth/me")
 async def delete_account(current_user: User = Depends(get_current_user)):
     """Permanently delete user account and associated customer records"""
-    # 1. Delete all customer records associated with this phone AND name
-    await db.customers.delete_many({"phone": current_user.phone, "name": current_user.name})
+    # 1. Delete all customer records associated with this phone number
+    await db.customers.delete_many({"phone": current_user.phone})
     
     # 2. If user is a shop owner, we might want to handle their shops
     # For now, we'll just remove the user record to keep it simple
@@ -939,10 +922,9 @@ async def get_customer_ledger(current_user: User = Depends(get_current_user)):
     if current_user.active_role != "customer":
         raise HTTPException(status_code=403, detail="Only customers can view ledger")
     
-    # Filter customers by BOTH phone and name (case-insensitive) to ensure data isolation
+    # Filter customers by phone number to find all linked shop records
     customers = await db.customers.find({
-        "phone": current_user.phone,
-        "name": {"$regex": f"^{current_user.name}$", "$options": "i"}
+        "phone": current_user.phone
     }).to_list(length=None)
     
     ledger_data = []
@@ -986,8 +968,7 @@ async def connect_to_shop_public(shop_code: str, customer_data: dict):
     
     existing_customer = await db.customers.find_one({
         "shop_id": shop["id"],
-        "phone": customer_data["phone"],
-        "name": {"$regex": f"^{customer_data['name']}$", "$options": "i"}
+        "phone": customer_data["phone"]
     })
     
     if existing_customer:
