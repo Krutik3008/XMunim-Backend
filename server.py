@@ -13,6 +13,8 @@ from datetime import datetime, timezone, timedelta
 import jwt
 import random
 import string
+import firebase_admin
+from firebase_admin import credentials, messaging
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -32,6 +34,28 @@ api_router = APIRouter(prefix="/api")
 JWT_SECRET = "shopmunim_secret_key_2024"
 security = HTTPBearer()
 
+# Firebase Admin Configuration
+try:
+    # 1. Try to load from environment variable (Best for Render/Production)
+    firebase_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON')
+    if firebase_json:
+        import json
+        firebase_info = json.loads(firebase_json)
+        cred = credentials.Certificate(firebase_info)
+        firebase_admin.initialize_app(cred)
+        print("Firebase Admin initialized successfully via environment variable.")
+    else:
+        # 2. Fallback to local file (Best for Local Development)
+        firebase_creds_path = ROOT_DIR / 'firebase-service-account.json'
+        if firebase_creds_path.exists():
+            cred = credentials.Certificate(str(firebase_creds_path))
+            firebase_admin.initialize_app(cred)
+            print("Firebase Admin initialized successfully via local file.")
+        else:
+            print("Warning: Firebase credentials not found (neither FIREBASE_SERVICE_ACCOUNT_JSON nor firebase-service-account.json)")
+except Exception as e:
+    print(f"Failed to initialize Firebase Admin: {e}")
+
 # ==================== Pydantic Models ====================
 
 class User(BaseModel):
@@ -44,6 +68,7 @@ class User(BaseModel):
     flagged: bool = False
     terms_accepted: bool = False  # Terms of Services & Privacy Policy acceptance
     profile_photo: Optional[str] = None  # Base64-encoded profile photo
+    fcm_token: Optional[str] = None  # Firebase Cloud Messaging token for push notifications
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Shop(BaseModel):
@@ -69,6 +94,10 @@ class Customer(BaseModel):
     phone: str
     nickname: Optional[str] = None
     balance: float = 0.0  # negative means customer owes money
+    is_auto_reminder_enabled: bool = False
+    auto_reminder_delay: str = "3 days overdue"
+    auto_reminder_frequency: str = "Daily until paid"
+    auto_reminder_method: str = "Push Notification"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Product(BaseModel):
@@ -152,6 +181,10 @@ class CustomerCreateRequest(BaseModel):
     name: str
     phone: str
     nickname: Optional[str] = None
+    is_auto_reminder_enabled: Optional[bool] = False
+    auto_reminder_delay: Optional[str] = "3 days overdue"
+    auto_reminder_frequency: Optional[str] = "Daily until paid"
+    auto_reminder_method: Optional[str] = "Push Notification"
 
 class ProductCreateRequest(BaseModel):
     name: str
@@ -177,6 +210,10 @@ class CustomerUpdateRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     nickname: Optional[str] = None
+    is_auto_reminder_enabled: Optional[bool] = None
+    auto_reminder_delay: Optional[str] = None
+    auto_reminder_frequency: Optional[str] = None
+    auto_reminder_method: Optional[str] = None
 
 class UserVerifyRequest(BaseModel):
     verified: Optional[bool] = None
@@ -184,9 +221,15 @@ class UserVerifyRequest(BaseModel):
 
 class UserUpdateRequest(BaseModel):
     name: Optional[str] = None
+    fcm_token: Optional[str] = None
 
 class ProfilePhotoRequest(BaseModel):
     photo: str  # Base64-encoded image string
+
+class PushNotificationRequest(BaseModel):
+    title: str
+    body: str
+    data: Optional[dict] = None
 
 # ==================== Helper Functions ====================
 
@@ -341,6 +384,8 @@ async def update_current_user(request: UserUpdateRequest, current_user: User = D
     update_data = {}
     if request.name is not None:
         update_data["name"] = request.name
+    if request.fcm_token is not None:
+        update_data["fcm_token"] = request.fcm_token
         
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
@@ -737,6 +782,14 @@ async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdat
         update_data["phone"] = request.phone
     if request.nickname is not None:
         update_data["nickname"] = request.nickname
+    if request.is_auto_reminder_enabled is not None:
+        update_data["is_auto_reminder_enabled"] = request.is_auto_reminder_enabled
+    if request.auto_reminder_delay is not None:
+        update_data["auto_reminder_delay"] = request.auto_reminder_delay
+    if request.auto_reminder_frequency is not None:
+        update_data["auto_reminder_frequency"] = request.auto_reminder_frequency
+    if request.auto_reminder_method is not None:
+        update_data["auto_reminder_method"] = request.auto_reminder_method
 
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
@@ -748,6 +801,41 @@ async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdat
 
     updated_customer = await db.customers.find_one({"id": customer_id})
     return Customer(**parse_from_mongo(updated_customer))
+
+@api_router.post("/shops/{shop_id}/customers/{customer_id}/notify-payment")
+async def notify_customer_payment(shop_id: str, customer_id: str, request: PushNotificationRequest, current_user: User = Depends(get_current_user)):
+    """Send a push notification to a customer for payment request"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    # Find the User document associated with this customer's phone number to get FCM token
+    user = await db.users.find_one({"phone": customer["phone"]})
+    if not user:
+        raise HTTPException(status_code=404, detail="Customer has not registered on the app yet. Try SMS or WhatsApp.")
+    
+    if not user.get("fcm_token"):
+        raise HTTPException(status_code=400, detail="Customer has not enabled push notifications.")
+
+    # Send Firebase Push Notification
+    try:
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title=request.title,
+                body=request.body,
+            ),
+            data=request.data or {},
+            token=user["fcm_token"],
+        )
+        response = messaging.send(message)
+        return {"success": True, "message_id": response, "message": "Notification sent successfully"}
+    except Exception as e:
+        print(f"Error sending push notification: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send push notification: {str(e)}")
 
 @api_router.post("/shops/{shop_id}/transactions", response_model=Transaction)
 async def create_transaction(shop_id: str, request: TransactionCreateRequest, current_user: User = Depends(get_current_user)):

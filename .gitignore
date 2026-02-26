@@ -37,3 +37,8 @@ Desktop.ini
 *.bak
 *.swp
 *.tmp
+
+# Firebase
+firebase-service-account.json
+google-services.json
+GoogleService-Info.plist
