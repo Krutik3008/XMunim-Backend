@@ -72,6 +72,9 @@ class User(BaseModel):
     terms_accepted: bool = False  # Terms of Services & Privacy Policy acceptance
     profile_photo: Optional[str] = None  # Base64-encoded profile photo
     fcm_token: Optional[str] = None  # Firebase Cloud Messaging token for push notifications
+    push_enabled: bool = True
+    payment_alerts_enabled: bool = True
+    promotions_enabled: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Shop(BaseModel):
@@ -101,6 +104,7 @@ class Customer(BaseModel):
     auto_reminder_delay: str = "3 days overdue"
     auto_reminder_frequency: str = "Daily until paid"
     auto_reminder_method: str = "Push Notification"
+    auto_reminder_message: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Product(BaseModel):
@@ -200,6 +204,7 @@ class CustomerCreateRequest(BaseModel):
     auto_reminder_delay: Optional[str] = "3 days overdue"
     auto_reminder_frequency: Optional[str] = "Daily until paid"
     auto_reminder_method: Optional[str] = "Push Notification"
+    auto_reminder_message: Optional[str] = None
 
 class ProductCreateRequest(BaseModel):
     name: str
@@ -229,6 +234,7 @@ class CustomerUpdateRequest(BaseModel):
     auto_reminder_delay: Optional[str] = None
     auto_reminder_frequency: Optional[str] = None
     auto_reminder_method: Optional[str] = None
+    auto_reminder_message: Optional[str] = None
 
 class UserVerifyRequest(BaseModel):
     verified: Optional[bool] = None
@@ -237,6 +243,9 @@ class UserVerifyRequest(BaseModel):
 class UserUpdateRequest(BaseModel):
     name: Optional[str] = None
     fcm_token: Optional[str] = None
+    push_enabled: Optional[bool] = None
+    payment_alerts_enabled: Optional[bool] = None
+    promotions_enabled: Optional[bool] = None
 
 class ProfilePhotoRequest(BaseModel):
     photo: str  # Base64-encoded image string
@@ -410,6 +419,12 @@ async def update_current_user(request: UserUpdateRequest, current_user: User = D
         update_data["name"] = request.name
     if request.fcm_token is not None:
         update_data["fcm_token"] = request.fcm_token
+    if request.push_enabled is not None:
+        update_data["push_enabled"] = request.push_enabled
+    if request.payment_alerts_enabled is not None:
+        update_data["payment_alerts_enabled"] = request.payment_alerts_enabled
+    if request.promotions_enabled is not None:
+        update_data["promotions_enabled"] = request.promotions_enabled
         
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
@@ -839,6 +854,15 @@ async def notify_customer_payment(shop_id: str, customer_id: str, request: PushN
 
     # Find the User document associated with this customer's phone number to get FCM token
     user = await db.users.find_one({"phone": customer["phone"]})
+
+    # NEW: Check if customer has disabled notifications in their preferences
+    if (request.method or "Push Notification") == "Push Notification":
+        if user:
+            if not user.get("push_enabled", True):
+                raise HTTPException(status_code=400, detail="Customer has disabled push notifications in their preferences.")
+            
+            if not user.get("payment_alerts_enabled", True):
+                raise HTTPException(status_code=400, detail="Customer has disabled payment alerts in their preferences.")
     
     # Logic for logging the request regardless of method (SMS/WhatsApp are handled client-side but can be logged via this endpoint)
     payment_req = PaymentRequest(
@@ -1498,9 +1522,18 @@ async def reminder_worker():
 
                 if should_send and customer.get("auto_reminder_method") == "Push Notification":
                     user = await db.users.find_one({"phone": customer["phone"]})
-                    if user and user.get("fcm_token"):
+                    if user and user.get("fcm_token") and user.get("push_enabled", True) and user.get("payment_alerts_enabled", True):
                         title = "Payment Reminder"
-                        body = f"Hello {customer['name']}, you have a pending payment of ₹{abs(customer['balance']):.2f} at {shop['name']}. Please settle your dues. Thank you!"
+                        
+                        # Use custom message if available, otherwise use default
+                        custom_msg = customer.get("auto_reminder_message")
+                        if custom_msg and custom_msg.strip():
+                            body = custom_msg.replace("{name}", customer["name"])\
+                                             .replace("{amount}", f"{abs(customer['balance']):.2f}")\
+                                             .replace("{delay}", customer.get("auto_reminder_delay", "3 days overdue"))\
+                                             .replace("{frequency}", customer.get("auto_reminder_frequency", "Daily until paid"))
+                        else:
+                            body = f"Hello {customer['name']}, you have a pending payment of ₹{abs(customer['balance']):.2f} at {shop['name']}. Please settle your dues. Thank you!"
                         
                         try:
                             message = messaging.Message(
