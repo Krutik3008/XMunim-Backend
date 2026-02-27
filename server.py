@@ -1504,20 +1504,48 @@ async def reminder_worker():
                     sort=[("created_at", -1)]
                 )
 
-                # Logic for "3 days overdue" etc. - for MVP we'll simplify
-                # If no reminder sent yet, or if frequency is daily/weekly
+                # Dynamic logic for delay mapping
+                delay_str = customer.get("auto_reminder_delay", "3 days overdue")
+                delay_days = 3
+                if "1 day" in delay_str:
+                    delay_days = 1
+                elif "7 days" in delay_str:
+                    delay_days = 7
+                elif "15 days" in delay_str:
+                    delay_days = 15
+                elif "30 days" in delay_str:
+                    delay_days = 30
+
                 should_send = False
                 now = datetime.now(timezone.utc)
                 
                 if not last_reminder:
-                    should_send = True
+                    # Check if enough days have passed since the last transaction to trigger the FIRST reminder
+                    last_txn_str = customer.get("last_transaction_date")
+                    if last_txn_str:
+                        # Convert ISO format date to offset-aware UTC datetime
+                        try:
+                            last_txn_date = datetime.fromisoformat(last_txn_str.replace("Z", "+00:00"))
+                        except ValueError:
+                            last_txn_date = now - timedelta(days=delay_days) # fallback trigger immediately if invalid date
+                        
+                        if (now - last_txn_date).days >= delay_days:
+                            should_send = True
+                    else:
+                        # If no last transaction date is recorded, trigger it based on creation or immediately.
+                        should_send = True
                 else:
+                    # Check frequency if already sent once
                     last_sent = parse_from_mongo(last_reminder)["created_at"]
                     freq = customer.get("auto_reminder_frequency", "Daily until paid")
                     
-                    if freq == "Daily until paid" and (now - last_sent).days >= 1:
+                    if freq == "Send once only":
+                        should_send = False
+                    elif freq == "Daily until paid" and (now - last_sent).days >= 1:
                         should_send = True
                     elif freq == "Weekly until paid" and (now - last_sent).days >= 7:
+                        should_send = True
+                    elif freq == "Every 2 weeks" and (now - last_sent).days >= 14:
                         should_send = True
 
                 if should_send and customer.get("auto_reminder_method") == "Push Notification":
