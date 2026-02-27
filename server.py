@@ -15,6 +15,7 @@ import random
 import string
 import firebase_admin
 from firebase_admin import credentials, messaging
+import asyncio
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -126,6 +127,18 @@ class Transaction(BaseModel):
     date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+class PaymentRequest(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    shop_id: str
+    customer_id: str
+    amount: float
+    method: str  # "Push Notification", "SMS", "WhatsApp"
+    title: str
+    message: str
+    status: str = "sent"  # "sent", "delivered", "failed", "pending"
+    scheduled_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 # ==================== Request Models ====================
 
@@ -230,6 +243,8 @@ class PushNotificationRequest(BaseModel):
     title: str
     body: str
     data: Optional[dict] = None
+    method: Optional[str] = "Push Notification"
+    scheduled_at: Optional[datetime] = None
 
 # ==================== Helper Functions ====================
 
@@ -274,22 +289,29 @@ async def get_admin_user(current_user: User = Depends(get_current_user)):
     return current_user
 
 def prepare_for_mongo(data):
-    """Convert datetime objects to ISO strings for MongoDB storage"""
-    if isinstance(data, dict):
-        for key, value in data.items():
-            if isinstance(value, datetime):
-                data[key] = value.isoformat()
+    """Keep datetime objects as is for MongoDB BSON Date support, or convert if needed"""
+    # MongoDB handles datetime objects natively as BSON Dates
+    # We only convert if we specifically want strings
     return data
 
 def parse_from_mongo(item):
-    """Parse datetime strings back from MongoDB"""
+    """Parse datetime strings or objects back from MongoDB and remove _id"""
+    if item is None:
+        return None
     if isinstance(item, dict):
+        item = item.copy()  # Don't modify original
+        if '_id' in item:
+            item.pop('_id')
         for key, value in item.items():
-            if isinstance(value, str) and key in ['created_at', 'date']:
+            if isinstance(value, str) and key in ['created_at', 'date', 'scheduled_at']:
                 try:
-                    item[key] = datetime.fromisoformat(value)
+                    item[key] = datetime.fromisoformat(value.replace('Z', '+00:00'))
                 except:
                     pass
+            elif isinstance(value, datetime):
+                # Ensure all datetimes are offset-aware for comparison (Motor usually returns naive UTC)
+                if value.tzinfo is None:
+                    item[key] = value.replace(tzinfo=timezone.utc)
     return item
 
 # ==================== Authentication Routes ====================
@@ -804,7 +826,7 @@ async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdat
 
 @api_router.post("/shops/{shop_id}/customers/{customer_id}/notify-payment")
 async def notify_customer_payment(shop_id: str, customer_id: str, request: PushNotificationRequest, current_user: User = Depends(get_current_user)):
-    """Send a push notification to a customer for payment request"""
+    """Send a push notification to a customer for payment request and log it"""
     shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
@@ -815,27 +837,59 @@ async def notify_customer_payment(shop_id: str, customer_id: str, request: PushN
 
     # Find the User document associated with this customer's phone number to get FCM token
     user = await db.users.find_one({"phone": customer["phone"]})
-    if not user:
-        raise HTTPException(status_code=404, detail="Customer has not registered on the app yet. Try SMS or WhatsApp.")
     
-    if not user.get("fcm_token"):
-        raise HTTPException(status_code=400, detail="Customer has not enabled push notifications.")
+    # Logic for logging the request regardless of method (SMS/WhatsApp are handled client-side but can be logged via this endpoint)
+    payment_req = PaymentRequest(
+        shop_id=shop_id,
+        customer_id=customer_id,
+        amount=abs(customer.get("balance", 0)),
+        method=request.method or "Push Notification",
+        title=request.title,
+        message=request.body,
+        status="pending" if request.scheduled_at else "sent",
+        scheduled_at=request.scheduled_at
+    )
+    
+    # Store the record
+    await db.payment_requests.insert_one(prepare_for_mongo(payment_req.dict()))
 
-    # Send Firebase Push Notification
-    try:
-        message = messaging.Message(
-            notification=messaging.Notification(
-                title=request.title,
-                body=request.body,
-            ),
-            data=request.data or {},
-            token=user["fcm_token"],
-        )
-        response = messaging.send(message)
-        return {"success": True, "message_id": response, "message": "Notification sent successfully"}
-    except Exception as e:
-        print(f"Error sending push notification: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to send push notification: {str(e)}")
+    if request.scheduled_at:
+        return {"success": True, "message": "Reminder scheduled successfully", "id": payment_req.id}
+
+    if (request.method or "Push Notification") == "Push Notification":
+        if not user:
+            raise HTTPException(status_code=404, detail="Customer has not registered on the app yet. Try SMS or WhatsApp.")
+        
+        if not user.get("fcm_token"):
+            raise HTTPException(status_code=400, detail="Customer has not enabled push notifications.")
+
+        logger.info(f"Sending Push: Title='{request.title}', Body='{request.body}' to token '...{user['fcm_token'][-10:]}'")
+        
+        # Send Firebase Push Notification
+        try:
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=request.title,
+                    body=request.body,
+                ),
+                android=messaging.AndroidConfig(
+                    notification=messaging.AndroidNotification(
+                        color="#304FFE",
+                        channel_id="default"
+                    )
+                ),
+                data=request.data or {},
+                token=user["fcm_token"],
+            )
+            response = messaging.send(message)
+            return {"success": True, "message_id": response, "message": "Notification sent successfully"}
+        except Exception as e:
+            print(f"Error sending push notification: {e}")
+            # Update status to failed
+            await db.payment_requests.update_one({"id": payment_req.id}, {"$set": {"status": "failed"}})
+            raise HTTPException(status_code=500, detail=f"Failed to send push notification: {str(e)}")
+    
+    return {"success": True, "message": f"{request.method} request logged successfully"}
 
 @api_router.post("/shops/{shop_id}/transactions", response_model=Transaction)
 async def create_transaction(shop_id: str, request: TransactionCreateRequest, current_user: User = Depends(get_current_user)):
@@ -1254,6 +1308,79 @@ async def get_all_customers(admin_user: User = Depends(get_admin_user), search: 
         "limit": limit
     }
 
+@api_router.get("/shops/{shop_id}/notifications")
+async def get_shop_notifications(shop_id: str, current_user: User = Depends(get_current_user)):
+    """Get all payment requests/notifications sent by a specific shop"""
+    # 1. Verify shop ownership
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found or access denied")
+
+    # 2. Get all payment requests for this shop
+    notifications = await db.payment_requests.find(
+        {"shop_id": shop_id},
+        sort=[("created_at", -1)]
+    ).to_list(length=100) # Limit to last 100 for now
+
+    # 3. Enrich with customer info
+    enriched_notifications = []
+    for noti in notifications:
+        customer = await db.customers.find_one({"id": noti["customer_id"]})
+        noti_data = parse_from_mongo(noti)
+        noti_data["customer_name"] = customer["name"] if customer else "Unknown Customer"
+        # Handle cases where existing logs don't have a title
+        if "title" not in noti_data:
+            noti_data["title"] = "Payment Request"
+        enriched_notifications.append(noti_data)
+
+    return enriched_notifications
+
+@api_router.get("/shops/{shop_id}/customers/{customer_id}/notifications")
+async def get_customer_payment_history(shop_id: str, customer_id: str, current_user: User = Depends(get_current_user)):
+    """Get payment request history for a specific customer in a shop"""
+    # 1. Verify shop ownership
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found or access denied")
+
+    # 2. Get all payment requests for this specific customer
+    notifications = await db.payment_requests.find(
+        {"shop_id": shop_id, "customer_id": customer_id},
+        sort=[("created_at", -1)]
+    ).to_list(length=None)
+
+    # 3. Parse and return
+    return [parse_from_mongo(noti) for noti in notifications]
+
+@api_router.get("/customer/notifications")
+async def get_customer_notifications(current_user: User = Depends(get_current_user)):
+    """Get all payment requests/notifications for the current customer (by phone)"""
+    # 1. Find all customer entries for this phone number across all shops
+    customers = await db.customers.find({"phone": current_user.phone}).to_list(length=None)
+    customer_ids = [c["id"] for c in customers]
+    
+    if not customer_ids:
+        return []
+
+    # 2. Get all payment requests for these customer IDs
+    notifications = await db.payment_requests.find(
+        {"customer_id": {"$in": customer_ids}},
+        sort=[("created_at", -1)]
+    ).to_list(length=None)
+
+    # 3. Enrich with shop info
+    enriched_notifications = []
+    for noti in notifications:
+        shop = await db.shops.find_one({"id": noti["shop_id"]})
+        noti_data = parse_from_mongo(noti)
+        noti_data["shop_name"] = shop["name"] if shop else "Unknown Shop"
+        # Handle cases where existing logs don't have a title
+        if "title" not in noti_data:
+            noti_data["title"] = "Payment Request"
+        enriched_notifications.append(noti_data)
+
+    return enriched_notifications
+
 # ==================== App Configuration ====================
 
 # Include the router in the main app
@@ -1273,6 +1400,134 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(reminder_worker())
+
+async def reminder_worker():
+    """Background worker for automated reminders"""
+    while True:
+        try:
+            logger.info("Running automated reminder scan...")
+            # 1. Process One-off Scheduled Reminders (All customers)
+            now = datetime.now(timezone.utc)
+            now_str = now.isoformat()
+            
+            scheduled_items = await db.payment_requests.find({
+                "status": "pending",
+                "scheduled_at": {"$ne": None},
+                "$or": [
+                    {"scheduled_at": {"$lte": now}},
+                    {"scheduled_at": {"$lte": now_str}}
+                ]
+            }).to_list(length=None)
+
+            if scheduled_items:
+                logger.info(f"Found {len(scheduled_items)} pending scheduled reminders to process.")
+
+            for item in scheduled_items:
+                try:
+                    customer = await db.customers.find_one({"id": item["customer_id"]})
+                    if not customer:
+                        await db.payment_requests.update_one({"id": item["id"]}, {"$set": {"status": "failed", "error": "Customer not found"}})
+                        continue
+
+                    if item["method"] == "Push Notification":
+                        user = await db.users.find_one({"phone": customer["phone"]})
+                        if user and user.get("fcm_token"):
+                            logger.info(f"Worker Sending Push: Title='{item['title']}', Body='{item['message']}' to {customer['name']}")
+                            message = messaging.Message(
+                                notification=messaging.Notification(title=item["title"], body=item["message"]),
+                                android=messaging.AndroidConfig(
+                                    notification=messaging.AndroidNotification(
+                                        color="#304FFE",
+                                        channel_id="default"
+                                    )
+                                ),
+                                data={"customerId": customer["id"]},
+                                token=user["fcm_token"],
+                            )
+                            messaging.send(message)
+                            await db.payment_requests.update_one({"id": item["id"]}, {"$set": {"status": "sent"}})
+                            logger.info(f"Scheduled reminder sent to {customer['name']}")
+                        else:
+                            await db.payment_requests.update_one({"id": item["id"]}, {"$set": {"status": "failed", "error": "FCM token missing"}})
+                    else:
+                        # Mark SMS/WhatsApp as sent since they are logged for history
+                        await db.payment_requests.update_one({"id": item["id"]}, {"$set": {"status": "sent"}})
+                except Exception as e:
+                    logger.error(f"Failed to send scheduled reminder {item.get('id')}: {e}")
+                    await db.payment_requests.update_one({"id": item.get("id")}, {"$set": {"status": "failed"}})
+
+            # 2. Find all customers with auto-reminders enabled and balance < 0
+            customers = await db.customers.find({
+                "is_auto_reminder_enabled": True,
+                "balance": {"$lt": 0}
+            }).to_list(length=None)
+
+            for customer in customers:
+                # 3. Check last transaction date and last reminder date
+                shop = await db.shops.find_one({"id": customer["shop_id"]})
+                if not shop:
+                    continue
+
+                # Get last reminder for this customer
+                last_reminder = await db.payment_requests.find_one(
+                    {"customer_id": customer["id"], "status": "sent"},
+                    sort=[("created_at", -1)]
+                )
+
+                # Logic for "3 days overdue" etc. - for MVP we'll simplify
+                # If no reminder sent yet, or if frequency is daily/weekly
+                should_send = False
+                now = datetime.now(timezone.utc)
+                
+                if not last_reminder:
+                    should_send = True
+                else:
+                    last_sent = parse_from_mongo(last_reminder)["created_at"]
+                    freq = customer.get("auto_reminder_frequency", "Daily until paid")
+                    
+                    if freq == "Daily until paid" and (now - last_sent).days >= 1:
+                        should_send = True
+                    elif freq == "Weekly until paid" and (now - last_sent).days >= 7:
+                        should_send = True
+
+                if should_send and customer.get("auto_reminder_method") == "Push Notification":
+                    user = await db.users.find_one({"phone": customer["phone"]})
+                    if user and user.get("fcm_token"):
+                        title = "Payment Reminder"
+                        body = f"Hello {customer['name']}, you have a pending payment of ₹{abs(customer['balance']):.2f} at {shop['name']}. Please settle your dues. Thank you!"
+                        
+                        try:
+                            message = messaging.Message(
+                                notification=messaging.Notification(title=title, body=body),
+                                data={"customerId": customer["id"]},
+                                token=user["fcm_token"],
+                            )
+                            messaging.send(message)
+                            
+                            # Log the auto-reminder
+                            payment_req = PaymentRequest(
+                                shop_id=customer["shop_id"],
+                                customer_id=customer["id"],
+                                amount=abs(customer["balance"]),
+                                method="Push Notification",
+                                title=title,
+                                message=body,
+                                status="sent"
+                            )
+                            await db.payment_requests.insert_one(prepare_for_mongo(payment_req.dict()))
+                            logger.info(f"Auto-reminder sent to {customer['name']}")
+                        except Exception as e:
+                            logger.error(f"Failed to send auto-reminder: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in reminder worker: {e}")
+        
+        # Sleep for 60 seconds between scans (for testing responsiveness)
+        await asyncio.sleep(60) 
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
