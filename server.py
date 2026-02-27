@@ -53,7 +53,9 @@ try:
             firebase_admin.initialize_app(cred)
             print("Firebase Admin initialized successfully via local file.")
         else:
-            print("Warning: Firebase credentials not found (neither FIREBASE_SERVICE_ACCOUNT_JSON nor firebase-service-account.json)")
+            print("CRITICAL: Firebase credentials not found!")
+            print("For Production (Render): Set 'FIREBASE_SERVICE_ACCOUNT_JSON' environment variable with contents of your service account JSON.")
+            print("For Local: Place 'firebase-service-account.json' in the backend root directory.")
 except Exception as e:
     print(f"Failed to initialize Firebase Admin: {e}")
 
