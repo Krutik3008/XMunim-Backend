@@ -1434,6 +1434,15 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("startup")
 async def startup_event():
+    # Create TTL index on payment_requests (notifications)
+    # 2592000 seconds = 30 days
+    await db.payment_requests.create_index(
+        "created_at",
+        expireAfterSeconds=2592000,
+        name="ttl_index_30_days"
+    )
+    logger.info("Checked/Created TTL index on payment_requests.created_at for 30-day auto-delete")
+    
     asyncio.create_task(reminder_worker())
 
 async def reminder_worker():
