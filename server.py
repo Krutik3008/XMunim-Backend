@@ -152,6 +152,14 @@ class PaymentRequest(BaseModel):
     scheduled_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+class UserSession(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    device: str
+    os: str
+    last_active: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 # ==================== Request Models ====================
 
@@ -386,6 +394,14 @@ async def verify_otp(request: OTPVerifyRequest):
     
     await db.otps.delete_many({"phone": request.phone})
     token = create_token(user.id)
+
+    # Create a new session record
+    new_session = UserSession(
+        user_id=user.id,
+        device="Android App" if "android" in (request.name or "").lower() else "Mobile App",
+        os="Android" if "android" in (request.name or "").lower() else "iOS/Android"
+    )
+    await db.sessions.insert_one(prepare_for_mongo(new_session.dict()))
     
     return {
         "token": token,
@@ -482,17 +498,39 @@ async def remove_profile_photo(current_user: User = Depends(get_current_user)):
 
 @api_router.get("/auth/sessions")
 async def get_sessions(current_user: User = Depends(get_current_user)):
-    """Get active sessions (Mocked for now)"""
-    return {
-        "sessions": [
-            {
-                "id": "session_1",
-                "device": "Browser",
-                "os": "Windows/Mac/Linux",
-                "last_active": datetime.now(timezone.utc).isoformat()
-            }
-        ]
-    }
+    """Get active sessions from database"""
+    sessions = await db.sessions.find({"user_id": current_user.id}).to_list(length=None)
+    
+    # Format for frontend
+    formatted_sessions = []
+    for s in sessions:
+        last_active = parse_from_mongo(s).get("last_active")
+        # Simple "Last Active" formatting
+        if last_active:
+            diff = datetime.now(timezone.utc) - last_active.replace(tzinfo=timezone.utc)
+            if diff.total_seconds() < 60:
+                last_active_str = "Just now"
+            elif diff.total_seconds() < 3600:
+                last_active_str = f"{int(diff.total_seconds() / 60)} minutes ago"
+            else:
+                last_active_str = f"{int(diff.total_seconds() / 3600)} hours ago"
+        else:
+            last_active_str = "Unknown"
+
+        formatted_sessions.append({
+            "id": s["id"],
+            "device": s["device"],
+            "os": s["os"],
+            "last_active": last_active_str
+        })
+
+    return {"sessions": formatted_sessions}
+
+@api_router.post("/auth/logout-all")
+async def logout_all_sessions(current_user: User = Depends(get_current_user)):
+    """Logout all sessions for the current user by deleting from DB"""
+    await db.sessions.delete_many({"user_id": current_user.id})
+    return {"message": "Logged out from all sessions successfully"}
 
 @api_router.post("/auth/request-data-export")
 async def request_data_export(current_user: User = Depends(get_current_user)):
