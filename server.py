@@ -557,23 +557,32 @@ async def request_data_export(current_user: User = Depends(get_current_user)):
     Story.append(Paragraph(f"Phone: {user_data.get('phone', 'N/A')}", styles['Normal']))
     Story.append(Spacer(1, 12))
     
-    Story.append(Paragraph("Shops Owned", styles['Heading2']))
+    # Build maps for lookups
+    customer_map = {c.get('id'): c.get('name', 'Unknown') for c in customers_data}
+    shop_map = {s.get('id'): s.get('name', 'Unknown Shop') for s in shops_data}
+    
+    is_customer = current_user.active_role == "customer"
+    
+    shops_title = "Connected Shops" if is_customer else "Shops Owned"
+    Story.append(Paragraph(shops_title, styles['Heading2']))
     for shop in shops_data:
         Story.append(Paragraph(f"- {shop.get('name')} ({shop.get('category')})", styles['Normal']))
     Story.append(Spacer(1, 12))
     
-    Story.append(Paragraph("Customers", styles['Heading2']))
+    cust_title = "Shop Balances" if is_customer else "Customers"
+    Story.append(Paragraph(cust_title, styles['Heading2']))
     
-    # ------------------ CUSTOMERS TABLE ------------------
-    cust_data_table = [["Name", "Phone", "Balance (Rs.)"]] # Header row
-    
-    # Build a quick lookup dictionary to map customer_id -> name for the transactions table
-    customer_map = {}
+    # ------------------ CUSTOMERS/BALANCES TABLE ------------------
+    col1_header = "Shop" if is_customer else "Name"
+    cust_data_table = [[col1_header, "Phone", "Balance (Rs.)"]] # Header row
     
     for cust in customers_data:
-        customer_map[cust.get('id')] = cust.get('name', 'Unknown')
         balance_val = cust.get('balance') or 0
-        cust_data_table.append([cust.get('name', 'N/A'), cust.get('phone', 'N/A'), f"{balance_val:.2f}"])
+        if is_customer:
+            name_val = shop_map.get(cust.get('shop_id'), 'Unknown Shop')
+        else:
+            name_val = cust.get('name', 'N/A')
+        cust_data_table.append([name_val, cust.get('phone', 'N/A'), f"{balance_val:.2f}"])
         
     if len(cust_data_table) > 1:
         c_table = Table(cust_data_table, colWidths=[200, 150, 100], hAlign='LEFT')
@@ -600,9 +609,13 @@ async def request_data_export(current_user: User = Depends(get_current_user)):
             Story.append(Paragraph(title, styles['Heading3']))
             Story.append(Spacer(1, 6))
             
-        tx_data_table = [["Date", "Time", "Customer", "Item(s)", "Type", "Amount (Rs.)"]]
+        col3_header = "Shop" if is_customer else "Customer"
+        tx_data_table = [["Date", "Time", col3_header, "Item(s)", "Type", "Amount (Rs.)"]]
         
-        for t in tx_list:
+        # Sort transactions by date/time (newest first)
+        sorted_tx = sorted(tx_list, key=lambda x: x.get('date', ''), reverse=True)
+        
+        for t in sorted_tx:
             raw_date = str(t.get('date', 'N/A')).replace('T', ' ')
             date_str, time_str = raw_date, ""
             
@@ -612,9 +625,13 @@ async def request_data_export(current_user: User = Depends(get_current_user)):
                 # Strip the seconds and timezone, keeping just HH:MM
                 time_str = parts[1][:5] if len(parts) > 1 else ""
                 
-            cust_name = customer_map.get(t.get('customer_id'), 'Unknown')
-            if len(cust_name) > 15:
-                cust_name = cust_name[:12] + "..."
+            if is_customer:
+                col3_val = shop_map.get(t.get('shop_id'), 'Unknown Shop')
+            else:
+                col3_val = customer_map.get(t.get('customer_id'), 'Unknown')
+                
+            if len(col3_val) > 15:
+                col3_val = col3_val[:12] + "..."
                 
             items = 'N/A'
             products = t.get('products')
@@ -633,7 +650,7 @@ async def request_data_export(current_user: User = Depends(get_current_user)):
                 tx_type = raw_type.capitalize()
             amount_val = t.get('amount') or 0
             
-            tx_data_table.append([date_str, time_str, cust_name, items, tx_type, f"{amount_val:.2f}"])
+            tx_data_table.append([date_str, time_str, col3_val, items, tx_type, f"{amount_val:.2f}"])
             
         if len(tx_data_table) > 1:
             t_table = Table(tx_data_table, colWidths=[65, 45, 90, 140, 60, 80], hAlign='LEFT')
@@ -654,25 +671,8 @@ async def request_data_export(current_user: User = Depends(get_current_user)):
         Story.append(Paragraph(f"<b>Total Count:</b> {len(tx_list)}", styles['Normal']))
         Story.append(Spacer(1, 15))
 
-    if current_user.active_role == "customer":
-        # Group transactions by shop
-        shop_map = {s.get('id'): s.get('name', 'Unknown Shop') for s in shops_data}
-        tx_by_shop = {}
-        for t in transactions_data:
-            sid = t.get('shop_id')
-            if sid not in tx_by_shop:
-                tx_by_shop[sid] = []
-            tx_by_shop[sid].append(t)
-            
-        if not tx_by_shop:
-            Story.append(Paragraph("No transactions found.", styles['Normal']))
-            
-        for sid, tx_list in tx_by_shop.items():
-            shop_name = shop_map.get(sid, 'Unknown')
-            build_tx_table(tx_list, title=f"Shop: {shop_name}")
-    else:
-        # Build one unified table for shop owner
-        build_tx_table(transactions_data)
+    # Build one unified table for either shop owner or customer
+    build_tx_table(transactions_data)
     
     # Build PDF
     doc.build(Story)
