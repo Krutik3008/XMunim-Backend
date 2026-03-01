@@ -9,9 +9,16 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
+import pytz
 from datetime import datetime, timezone, timedelta
 import jwt
 import random
+import io
+import base64
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 import string
 import firebase_admin
 from firebase_admin import credentials, messaging
@@ -474,16 +481,15 @@ async def remove_profile_photo(current_user: User = Depends(get_current_user)):
 # ==================== Security & Privacy Routes ====================
 
 @api_router.get("/auth/sessions")
-async def get_user_sessions(current_user: User = Depends(get_current_user)):
-    """Get active sessions for the current user (Mocked for now)"""
+async def get_sessions(current_user: User = Depends(get_current_user)):
+    """Get active sessions (Mocked for now)"""
     return {
         "sessions": [
             {
-                "id": str(uuid.uuid4()),
-                "device": "Mobile App",
-                "os": "Android" if random.random() > 0.5 else "iOS",
-                "last_active": datetime.now(timezone.utc).isoformat(),
-                "is_current": True
+                "id": "session_1",
+                "device": "Browser",
+                "os": "Windows/Mac/Linux",
+                "last_active": datetime.now(timezone.utc).isoformat()
             }
         ]
     }
@@ -491,8 +497,197 @@ async def get_user_sessions(current_user: User = Depends(get_current_user)):
 @api_router.post("/auth/request-data-export")
 async def request_data_export(current_user: User = Depends(get_current_user)):
     """Request a data export for the current user"""
-    # In a real app, this would trigger a background task to generate a CSV/PDF
-    return {"message": "Data export request received. You will receive an email shortly."}
+    # 1. Gather all user data
+    user_data = current_user.dict()
+    # 2. Check Role and Gather Data
+    if current_user.active_role == "customer":
+        # Customer: Find their profiles across all shops using phone number
+        customers = await db.customers.find({"phone": current_user.phone}).to_list(length=None)
+        customers_data = [parse_from_mongo(c) for c in customers]
+        customer_ids = [c["id"] for c in customers_data]
+        shop_ids = list(set([c["shop_id"] for c in customers_data]))
+        
+        # Get the shops they are customers of
+        shops = await db.shops.find({"id": {"$in": shop_ids}}).to_list(length=None)
+        shops_data = [parse_from_mongo(shop) for shop in shops]
+        
+        # Get ONLY their personal transactions
+        transactions = await db.transactions.find({"customer_id": {"$in": customer_ids}}).to_list(length=None)
+        transactions_data = [parse_from_mongo(t) for t in transactions]
+    else:
+        # Shopowner: Gather all shops owned by user
+        shops = await db.shops.find({"owner_id": current_user.id}).to_list(length=None)
+        shops_data = [parse_from_mongo(shop) for shop in shops]
+        shop_ids = [shop["id"] for shop in shops_data]
+        
+        # Gather all customers in these shops
+        customers = await db.customers.find({"shop_id": {"$in": shop_ids}}).to_list(length=None)
+        customers_data = [parse_from_mongo(customer) for customer in customers]
+        
+        # Gather all transactions in these shops
+        transactions = await db.transactions.find({"shop_id": {"$in": shop_ids}}).to_list(length=None)
+        transactions_data = [parse_from_mongo(t) for t in transactions]
+    
+    # Calculate IST time (UTC + 5:30)
+    ist_now = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+    formatted_date = ist_now.strftime("%d-%m-%Y %I:%M %p")
+
+    export_data = {
+        "user_profile": user_data,
+        "shops": shops_data,
+        "customers": customers_data,
+        "transactions": transactions_data,
+        "export_date": formatted_date
+    }
+    
+    # 5. Generate PDF Document
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    Story = []
+    
+    Story.append(Paragraph("ShopMunim - Data Export Report", styles['Title']))
+    Story.append(Spacer(1, 12))
+    
+    Story.append(Paragraph(f"Generated on: {export_data['export_date']}", styles['Normal']))
+    Story.append(Spacer(1, 12))
+    
+    Story.append(Paragraph("User Profile", styles['Heading2']))
+    Story.append(Paragraph(f"Name: {user_data.get('name', 'N/A')}", styles['Normal']))
+    Story.append(Paragraph(f"Phone: {user_data.get('phone', 'N/A')}", styles['Normal']))
+    Story.append(Spacer(1, 12))
+    
+    Story.append(Paragraph("Shops Owned", styles['Heading2']))
+    for shop in shops_data:
+        Story.append(Paragraph(f"- {shop.get('name')} ({shop.get('category')})", styles['Normal']))
+    Story.append(Spacer(1, 12))
+    
+    Story.append(Paragraph("Customers", styles['Heading2']))
+    
+    # ------------------ CUSTOMERS TABLE ------------------
+    cust_data_table = [["Name", "Phone", "Balance (Rs.)"]] # Header row
+    
+    # Build a quick lookup dictionary to map customer_id -> name for the transactions table
+    customer_map = {}
+    
+    for cust in customers_data:
+        customer_map[cust.get('id')] = cust.get('name', 'Unknown')
+        balance_val = cust.get('balance') or 0
+        cust_data_table.append([cust.get('name', 'N/A'), cust.get('phone', 'N/A'), f"{balance_val:.2f}"])
+        
+    if len(cust_data_table) > 1:
+        c_table = Table(cust_data_table, colWidths=[200, 150, 100], hAlign='LEFT')
+        c_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4A90E2')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F5F7FA')),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#E1E8ED'))
+        ]))
+        Story.append(c_table)
+    else:
+        Story.append(Paragraph("No customers found.", styles['Normal']))
+        
+    Story.append(Spacer(1, 20))
+    
+    # ------------------ TRANSACTIONS TABLE ------------------
+    Story.append(Paragraph("Transactions", styles['Heading2']))
+    
+    def build_tx_table(tx_list, title=None):
+        if title:
+            Story.append(Paragraph(title, styles['Heading3']))
+            Story.append(Spacer(1, 6))
+            
+        tx_data_table = [["Date", "Time", "Customer", "Item(s)", "Type", "Amount (Rs.)"]]
+        
+        for t in tx_list:
+            raw_date = str(t.get('date', 'N/A')).replace('T', ' ')
+            date_str, time_str = raw_date, ""
+            
+            parts = raw_date.split(' ')
+            if parts:
+                date_str = parts[0]
+                # Strip the seconds and timezone, keeping just HH:MM
+                time_str = parts[1][:5] if len(parts) > 1 else ""
+                
+            cust_name = customer_map.get(t.get('customer_id'), 'Unknown')
+            if len(cust_name) > 15:
+                cust_name = cust_name[:12] + "..."
+                
+            items = 'N/A'
+            products = t.get('products')
+            if products and isinstance(products, list) and len(products) > 0:
+                items = ", ".join([str(p.get('name', '')) for p in products if isinstance(p, dict)])
+            if items == 'N/A' and t.get('note'):
+                items = str(t.get('note'))
+                
+            if len(items) > 20: 
+                items = items[:17] + "..."
+                
+            raw_type = str(t.get('type', '')).lower()
+            if raw_type == 'debit':
+                tx_type = 'Payment'
+            else:
+                tx_type = raw_type.capitalize()
+            amount_val = t.get('amount') or 0
+            
+            tx_data_table.append([date_str, time_str, cust_name, items, tx_type, f"{amount_val:.2f}"])
+            
+        if len(tx_data_table) > 1:
+            t_table = Table(tx_data_table, colWidths=[65, 45, 90, 140, 60, 80], hAlign='LEFT')
+            t_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4A90E2')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F5F7FA')),
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#E1E8ED'))
+            ]))
+            Story.append(t_table)
+        else:
+            Story.append(Paragraph("No transactions found.", styles['Normal']))
+            
+        Story.append(Spacer(1, 10))
+        Story.append(Paragraph(f"<b>Total Count:</b> {len(tx_list)}", styles['Normal']))
+        Story.append(Spacer(1, 15))
+
+    if current_user.active_role == "customer":
+        # Group transactions by shop
+        shop_map = {s.get('id'): s.get('name', 'Unknown Shop') for s in shops_data}
+        tx_by_shop = {}
+        for t in transactions_data:
+            sid = t.get('shop_id')
+            if sid not in tx_by_shop:
+                tx_by_shop[sid] = []
+            tx_by_shop[sid].append(t)
+            
+        if not tx_by_shop:
+            Story.append(Paragraph("No transactions found.", styles['Normal']))
+            
+        for sid, tx_list in tx_by_shop.items():
+            shop_name = shop_map.get(sid, 'Unknown')
+            build_tx_table(tx_list, title=f"Shop: {shop_name}")
+    else:
+        # Build one unified table for shop owner
+        build_tx_table(transactions_data)
+    
+    # Build PDF
+    doc.build(Story)
+    
+    # Get PDF base64 string
+    pdf_value = buffer.getvalue()
+    buffer.close()
+    pdf_base64 = base64.b64encode(pdf_value).decode('utf-8')
+    
+    # Return the base64 encoded PDF string back to the frontend
+    return {
+        "success": True, 
+        "pdf_base64": pdf_base64,
+        "message": "Data export generated successfully."
+    }
 
 @api_router.post("/auth/reset-pin")
 async def reset_login_pin(current_user: User = Depends(get_current_user)):
@@ -1598,7 +1793,12 @@ async def reminder_worker():
                             await db.payment_requests.insert_one(prepare_for_mongo(payment_req.dict()))
                             logger.info(f"Auto-reminder sent to {customer['name']}")
                         except Exception as e:
-                            logger.error(f"Failed to send auto-reminder: {e}")
+                            error_str = str(e)
+                            if "SenderId mismatch" in error_str or "Unregistered" in error_str or "Requested entity was not found" in error_str:
+                                logger.warning(f"Invalid FCM token for user {user['phone']} ({error_str}). Removing token.")
+                                await db.users.update_one({"id": user["id"]}, {"$set": {"fcm_token": None}})
+                            else:
+                                logger.error(f"Failed to send auto-reminder: {e}")
 
         except Exception as e:
             logger.error(f"Error in reminder worker: {e}")
