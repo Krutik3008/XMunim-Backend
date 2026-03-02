@@ -1232,6 +1232,15 @@ async def create_product(shop_id: str, request: ProductCreateRequest, current_us
     shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
+        
+    # Check for existing product with same name (case-insensitive) in the same shop
+    existing_product = await db.products.find_one({
+        "shop_id": shop_id, 
+        "name": {"$regex": f"^{request.name}$", "$options": "i"}
+    })
+    
+    if existing_product:
+        raise HTTPException(status_code=400, detail="A product with this name already exists in this shop")
     
     product = Product(
         shop_id=shop_id,
