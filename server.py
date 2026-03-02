@@ -24,6 +24,13 @@ import firebase_admin
 from firebase_admin import credentials, messaging
 import asyncio
 
+# Configure logging right after imports
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("server")
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -44,27 +51,28 @@ security = HTTPBearer()
 
 # Firebase Admin Configuration
 try:
-    # 1. Try to load from environment variable (Best for Render/Production)
-    firebase_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON')
-    if firebase_json:
-        import json
-        firebase_info = json.loads(firebase_json)
-        cred = credentials.Certificate(firebase_info)
-        firebase_admin.initialize_app(cred)
-        print("Firebase Admin initialized successfully via environment variable.")
-    else:
-        # 2. Fallback to local file (Best for Local Development)
-        firebase_creds_path = ROOT_DIR / 'firebase-service-account.json'
-        if firebase_creds_path.exists():
-            cred = credentials.Certificate(str(firebase_creds_path))
+    if not firebase_admin._apps:
+        # 1. Try to load from environment variable (Best for Render/Production)
+        firebase_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON')
+        if firebase_json:
+            import json
+            firebase_info = json.loads(firebase_json)
+            cred = credentials.Certificate(firebase_info)
             firebase_admin.initialize_app(cred)
-            print("Firebase Admin initialized successfully via local file.")
+            logger.info("Firebase Admin initialized successfully via environment variable.")
         else:
-            print("CRITICAL: Firebase credentials not found!")
-            print("For Production (Render): Set 'FIREBASE_SERVICE_ACCOUNT_JSON' environment variable with contents of your service account JSON.")
-            print("For Local: Place 'firebase-service-account.json' in the backend root directory.")
+            # 2. Fallback to local file (Best for Local Development)
+            firebase_creds_path = ROOT_DIR / 'firebase-service-account.json'
+            if firebase_creds_path.exists():
+                cred = credentials.Certificate(str(firebase_creds_path))
+                firebase_admin.initialize_app(cred)
+                logger.info("Firebase Admin initialized successfully via local file.")
+            else:
+                logger.error("CRITICAL: Firebase credentials not found!")
+    else:
+        logger.info("Firebase Admin already initialized.")
 except Exception as e:
-    print(f"Failed to initialize Firebase Admin: {e}")
+    logger.error(f"Failed to initialize Firebase Admin: {e}")
 
 # ==================== Pydantic Models ====================
 
@@ -155,6 +163,7 @@ class PaymentRequest(BaseModel):
 class UserSession(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
+    phone: Optional[str] = None
     device: str
     os: str
     last_active: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -274,34 +283,56 @@ class PushNotificationRequest(BaseModel):
 
 # ==================== Helper Functions ====================
 
-def create_token(user_id: str) -> str:
+def create_token(user_id: str, session_id: str) -> str:
     now = datetime.now(timezone.utc)
     expiry = now.timestamp() + (30 * 24 * 60 * 60)  # 30 days
     payload = {
         "user_id": user_id,
+        "session_id": session_id,
         "exp": int(expiry),
         "iat": int(now.timestamp())
     }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
-def verify_token(token: str) -> str:
+async def verify_token(token: str) -> dict:
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return payload["user_id"]
+        user_id = payload.get("user_id")
+        session_id = payload.get("session_id")
+        
+        if not user_id or not session_id:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+            
+        # Check if session exists in DB
+        session = await db.sessions.find_one({"id": session_id, "user_id": user_id})
+        if not session:
+            raise HTTPException(status_code=401, detail="Session expired or logged out")
+            
+        return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError as e:
         print(f"JWT Error: {e}")
         raise HTTPException(status_code=401, detail="Invalid token")
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"JWT Verification Error: {e}")
         raise HTTPException(status_code=401, detail="Token verification failed")
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    user_id = verify_token(credentials.credentials)
+    payload = await verify_token(credentials.credentials)
+    user_id = payload["user_id"]
     user = await db.users.find_one({"id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    # Update last active time for the session
+    await db.sessions.update_one(
+        {"id": payload["session_id"]},
+        {"$set": {"last_active": datetime.now(timezone.utc)}}
+    )
+    
     return User(**parse_from_mongo(user))
 
 async def get_admin_user(current_user: User = Depends(get_current_user)):
@@ -393,15 +424,16 @@ async def verify_otp(request: OTPVerifyRequest):
             await db.users.update_one({"id": user.id}, {"$set": {"verified": True}})
     
     await db.otps.delete_many({"phone": request.phone})
-    token = create_token(user.id)
-
     # Create a new session record
     new_session = UserSession(
         user_id=user.id,
+        phone=user.phone,
         device="Android App" if "android" in (request.name or "").lower() else "Mobile App",
         os="Android" if "android" in (request.name or "").lower() else "iOS/Android"
     )
     await db.sessions.insert_one(prepare_for_mongo(new_session.dict()))
+    
+    token = create_token(user.id, new_session.id)
     
     return {
         "token": token,
@@ -498,8 +530,13 @@ async def remove_profile_photo(current_user: User = Depends(get_current_user)):
 
 @api_router.get("/auth/sessions")
 async def get_sessions(current_user: User = Depends(get_current_user)):
-    """Get active sessions from database"""
-    sessions = await db.sessions.find({"user_id": current_user.id}).to_list(length=None)
+    """Get active sessions from database (unified by phone, backward compatible)"""
+    sessions = await db.sessions.find({
+        "$or": [
+            {"phone": current_user.phone},
+            {"user_id": current_user.id}
+        ]
+    }).to_list(length=None)
     
     # Format for frontend
     formatted_sessions = []
@@ -526,10 +563,31 @@ async def get_sessions(current_user: User = Depends(get_current_user)):
 
     return {"sessions": formatted_sessions}
 
+@api_router.post("/auth/logout")
+async def logout_session(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Logout current session by deleting it from DB"""
+    try:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=["HS256"])
+        session_id = payload.get("session_id")
+        user_id = payload.get("user_id")
+        
+        if session_id and user_id:
+            await db.sessions.delete_one({"id": session_id, "user_id": user_id})
+            
+        return {"message": "Logged out successfully"}
+    except:
+        # Even if token is invalid, we return success as the goal is to be logged out
+        return {"message": "Logged out"}
+
 @api_router.post("/auth/logout-all")
 async def logout_all_sessions(current_user: User = Depends(get_current_user)):
-    """Logout all sessions for the current user by deleting from DB"""
-    await db.sessions.delete_many({"user_id": current_user.id})
+    """Logout all sessions for the current phone/user by deleting from DB"""
+    await db.sessions.delete_many({
+        "$or": [
+            {"phone": current_user.phone},
+            {"user_id": current_user.id}
+        ]
+    })
     return {"message": "Logged out from all sessions successfully"}
 
 @api_router.post("/auth/request-data-export")
@@ -1686,6 +1744,7 @@ async def startup_event():
     logger.info("Checked/Created TTL index on payment_requests.created_at for 30-day auto-delete")
     
     asyncio.create_task(reminder_worker())
+    logger.info("Server startup complete. Background worker started.")
 
 async def reminder_worker():
     """Background worker for automated reminders"""
