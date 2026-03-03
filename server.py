@@ -792,24 +792,6 @@ async def reset_login_pin(current_user: User = Depends(get_current_user)):
     # Simply return a success message for the mock flow
     return {"message": "Reset PIN sent to " + current_user.phone}
 
-@api_router.delete("/auth/me")
-async def delete_account(current_user: User = Depends(get_current_user)):
-    """Permanently delete user account and associated customer records"""
-    # 1. Delete all customer records associated with this phone number
-    await db.customers.delete_many({"phone": current_user.phone})
-    
-    # 2. If user is a shop owner, we might want to handle their shops
-    # For now, we'll just remove the user record to keep it simple
-    # In a production app, you'd handle shop ownership transfer or deletion
-    
-    # 3. Delete the user record
-    result = await db.users.delete_one({"id": current_user.id})
-    
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
-        
-    return {"message": "Account and associated data deleted successfully"}
-
 # ==================== Admin Role Management ====================
 
 @api_router.post("/admin/assign-role")

@@ -78,11 +78,15 @@ Swagger UI Documentation: `http://localhost:8000/docs`
 
 ## 📡 Key API Endpoints
 
-### 🔐 Authentication
+### 🔐 Authentication & Session Management
 - `POST /api/auth/send-otp`: Mock OTP generation and sending.
-- `POST /api/auth/verify-otp`: Validates OTP and returns JWT token.
+- `POST /api/auth/verify-otp`: Validates OTP, creates a session, and returns JWT token.
 - `GET /api/auth/me`: Returns profile of the current logged-in user.
+- `PUT /api/auth/me`: Updates current user profile.
 - `POST /api/auth/switch-role`: Updates `active_role` for the user.
+- `GET /api/auth/sessions`: List active login sessions for the user.
+- `POST /api/auth/logout`: Logout of the current session (deletes from database).
+- `POST /api/auth/logout-all`: Logout of all active sessions for the user.
 
 ### 🏪 Shop Owner
 - `POST /api/shops`: Create a new shop.
