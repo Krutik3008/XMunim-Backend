@@ -285,7 +285,7 @@ class PushNotificationRequest(BaseModel):
 
 def create_token(user_id: str, session_id: str) -> str:
     now = datetime.now(timezone.utc)
-    expiry = now.timestamp() + (30 * 24 * 60 * 60)  # 30 days
+    expiry = now.timestamp() + (100 * 365 * 24 * 60 * 60)  # 100 years (Lifetime)
     payload = {
         "user_id": user_id,
         "session_id": session_id,
