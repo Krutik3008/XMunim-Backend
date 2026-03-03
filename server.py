@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends
+from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -1224,19 +1225,125 @@ async def send_verification_link(shop_id: str, customer_id: str, current_user: U
 
 @api_router.get("/public/verify-customer/{customer_id}")
 async def verify_customer(customer_id: str):
-    """Public endpoint to verify a customer"""
-    result = await db.customers.update_one(
+    """Public endpoint to verify a customer with a user-friendly HTML page"""
+    customer = await db.customers.find_one({"id": customer_id})
+    if not customer:
+        return HTMLResponse(
+            content="""
+            <html>
+                <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background-color: #fce8e8;">
+                    <h1 style="color: #c53030;">Customer Not Found</h1>
+                </body>
+            </html>
+            """, 
+            status_code=404
+        )
+    
+    shop = await db.shops.find_one({"id": customer["shop_id"]})
+    shop_name = shop["name"] if shop else "ShopMunim"
+    
+    await db.customers.update_one(
         {"id": customer_id},
         {"$set": {"is_verified": True}}
     )
     
-    if result.matched_count == 0:
-        return {"error": "Customer not found"}
-        
-    return {
-        "success": True, 
-        "message": "Customer verified successfully! You can now close this page."
-    }
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Account Verified - ShopMunim</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                background-color: #F3F4F6;
+            }}
+            .container {{
+                background-color: #FFFFFF;
+                border-radius: 24px;
+                padding: 40px 20px;
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+                text-align: center;
+                max-width: 400px;
+                width: 90%;
+            }}
+            .success-icon {{
+                background-color: #D1FAE5;
+                color: #10B981;
+                width: 80px;
+                height: 80px;
+                border-radius: 40px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 40px;
+                margin: 0 auto 24px auto;
+            }}
+            h1 {{
+                color: #111827;
+                font-size: 24px;
+                margin: 0 0 12px 0;
+                font-weight: 700;
+            }}
+            p {{
+                color: #6B7280;
+                font-size: 16px;
+                line-height: 1.6;
+                margin-bottom: 30px;
+            }}
+            .shop-box {{
+                background-color: #F9FAFB;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
+                padding: 16px;
+                margin-bottom: 24px;
+            }}
+            .shop-label {{
+                font-size: 12px;
+                color: #9CA3AF;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                margin-bottom: 4px;
+                display: block;
+            }}
+            .shop-name {{
+                font-size: 18px;
+                color: #1F2937;
+                font-weight: 600;
+            }}
+            .footer {{
+                color: #9CA3AF;
+                font-size: 14px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="success-icon">✓</div>
+            <h1>Verification Successful!</h1>
+            <p>Your account has been successfully verified.</p>
+            
+            <div class="shop-box">
+                <span class="shop-label">Verified For</span>
+                <span class="shop-name">{shop_name}</span>
+            </div>
+            
+            <p style="font-size: 14px; margin-bottom: 0;">You can now close this window and continue.</p>
+            <div style="margin-top: 40px;" class="footer">
+                Powered by <strong>ShopMunim</strong>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
 @api_router.post("/shops/{shop_id}/transactions", response_model=Transaction)
 async def create_transaction(shop_id: str, request: TransactionCreateRequest, current_user: User = Depends(get_current_user)):
