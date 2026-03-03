@@ -573,6 +573,7 @@ async def logout_session(credentials: HTTPAuthorizationCredentials = Depends(sec
         
         if session_id and user_id:
             await db.sessions.delete_one({"id": session_id, "user_id": user_id})
+            logger.info(f"Session {session_id} for user {user_id} deleted successfully.")
             
         return {"message": "Logged out successfully"}
     except:
