@@ -1332,7 +1332,7 @@ async def verify_customer(customer_id: str):
             
             <div class="shop-box">
                 <span class="shop-label">Verified For</span>
-                <span class="shop-name">{shop_name}</span>
+                <span class="shop-name">Shop {shop_name}</span>
             </div>
             
             <p style="font-size: 14px; margin-bottom: 0;">You can now close this window and continue.</p>
