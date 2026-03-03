@@ -120,6 +120,7 @@ class Customer(BaseModel):
     auto_reminder_frequency: str = "Daily until paid"
     auto_reminder_method: str = "Push Notification"
     auto_reminder_message: Optional[str] = None
+    is_verified: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Product(BaseModel):
@@ -1074,7 +1075,8 @@ async def add_customer(shop_id: str, request: CustomerCreateRequest, current_use
         shop_id=shop_id,
         name=request.name,
         phone=request.phone,
-        nickname=request.nickname
+        nickname=request.nickname,
+        is_verified=False
     )
     
     
@@ -1097,7 +1099,9 @@ async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdat
     if request.name is not None:
         update_data["name"] = request.name
     if request.phone is not None:
-        update_data["phone"] = request.phone
+        if customer.get("phone") != request.phone:
+            update_data["phone"] = request.phone
+            update_data["is_verified"] = False
     if request.nickname is not None:
         update_data["nickname"] = request.nickname
     if request.is_auto_reminder_enabled is not None:
@@ -1196,6 +1200,44 @@ async def notify_customer_payment(shop_id: str, customer_id: str, request: PushN
     
     return {"success": True, "message": f"{request.method} request logged successfully"}
 
+@api_router.post("/shops/{shop_id}/customers/{customer_id}/send-verification")
+async def send_verification_link(shop_id: str, customer_id: str, current_user: User = Depends(get_current_user)):
+    """Generate a verification link for a customer"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    # In a real app, this would be a deep link to the app or a hosted page
+    # For MVP, we'll return a link to our public verification endpoint
+    # We use a hardcoded base URL for now as per implementation plan
+    verification_link = f"https://shopmunim-backend.onrender.com/api/public/verify-customer/{customer_id}"
+    
+    return {
+        "success": True, 
+        "verification_link": verification_link,
+        "message": "Verification link generated successfully"
+    }
+
+@api_router.get("/public/verify-customer/{customer_id}")
+async def verify_customer(customer_id: str):
+    """Public endpoint to verify a customer"""
+    result = await db.customers.update_one(
+        {"id": customer_id},
+        {"$set": {"is_verified": True}}
+    )
+    
+    if result.matched_count == 0:
+        return {"error": "Customer not found"}
+        
+    return {
+        "success": True, 
+        "message": "Customer verified successfully! You can now close this page."
+    }
+
 @api_router.post("/shops/{shop_id}/transactions", response_model=Transaction)
 async def create_transaction(shop_id: str, request: TransactionCreateRequest, current_user: User = Depends(get_current_user)):
     """Create a new transaction"""
@@ -1206,6 +1248,12 @@ async def create_transaction(shop_id: str, request: TransactionCreateRequest, cu
     customer = await db.customers.find_one({"id": request.customer_id, "shop_id": shop_id})
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+    
+    if not customer.get("is_verified", False):
+        raise HTTPException(
+            status_code=403, 
+            detail="Customer is not verified. Please send verification link and have customer verify before adding transactions."
+        )
     
     transaction_products = []
     calculated_amount = 0
