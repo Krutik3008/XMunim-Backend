@@ -1101,6 +1101,11 @@ async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdat
         update_data["name"] = request.name
     if request.phone is not None:
         if customer.get("phone") != request.phone:
+            # Check if the new phone number already exists in this shop
+            existing_customer = await db.customers.find_one({"shop_id": shop_id, "phone": request.phone})
+            if existing_customer:
+                raise HTTPException(status_code=400, detail="Phone number already exists")
+            
             update_data["phone"] = request.phone
             update_data["is_verified"] = False
     if request.nickname is not None:
