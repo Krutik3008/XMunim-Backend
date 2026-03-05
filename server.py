@@ -1395,9 +1395,19 @@ async def view_verify_customer(customer_id: str):
             </style>
             <script>
                 // Attempt to open the app via deep link after UI is visible.
-                setTimeout(function() {
-                    window.location.href = "shopmunim://verify-customer/{{CUSTOMER_ID}}";
-                }, 1500);
+                function openApp() {
+                    var deepLink = "shopmunim://verify-customer/{{CUSTOMER_ID}}";
+                    // Use intent:// for Chrome on Android
+                    var intentUrl = "intent://verify-customer/{{CUSTOMER_ID}}#Intent;scheme=shopmunim;package=com.krutik3011.ShopMunimApp;end";
+                    
+                    var ua = navigator.userAgent.toLowerCase();
+                    if (ua.indexOf('chrome') > -1 && ua.indexOf('android') > -1) {
+                        window.location.href = intentUrl;
+                    } else {
+                        window.location.href = deepLink;
+                    }
+                }
+                setTimeout(openApp, 1500);
                 
                 function showComingSoon(platform) {
                     alert(platform + " App is coming very soon!");
@@ -1447,7 +1457,7 @@ async def view_verify_customer(customer_id: str):
                 
                 <div id="action-buttons">
                     <p style="font-size: 14px; margin-bottom: 10px; margin-top: 0">Got the App?</p>
-                    <a href="shopmunim://verify-customer/{{CUSTOMER_ID}}" class="app-btn">Open ShopMunim App</a>
+                    <button onclick="openApp()" class="app-btn">Open ShopMunim App</button>
                     
                     <p style="font-size: 14px; margin-bottom: 10px; margin-top: 20px;">Or verify immediately:</p>
                     <button onclick="verifyInBrowser()" class="verify-btn">Verify in Browser</button>
