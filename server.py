@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -42,6 +43,11 @@ db = client[os.environ.get('DB_NAME', 'shopmunim_app')]
 
 # Create the main app without a prefix
 app = FastAPI(title="ShopMunim App Backend", version="1.0.0")
+
+# Mount static files for public assets
+if not (ROOT_DIR / "static").exists():
+    (ROOT_DIR / "static").mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(ROOT_DIR / "static")), name="static")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -1867,19 +1873,28 @@ async def view_connect_page(shop_code: str):
                 width: 92%;
             }
             .icon-circle {
-                width: 88px;
-                height: 88px;
+                width: 96px;
+                height: 96px;
                 border-radius: 50%;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                font-size: 42px;
                 margin: 0 auto 24px auto;
                 transition: all 0.5s ease;
+                overflow: hidden;
+                background-color: #F3F4F6;
+            }
+            .icon-circle img {
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
             }
             .icon-shop {
                 background: linear-gradient(135deg, #DBEAFE 0%, #93C5FD 100%);
-                color: #2563EB;
+                padding: 10px;
+            }
+            .icon-emoji {
+                font-size: 42px;
             }
             .icon-success {
                 background: linear-gradient(135deg, #A7F3D0 0%, #6EE7B7 100%);
@@ -1928,10 +1943,27 @@ async def view_connect_page(shop_code: str):
                 border-radius: 12px;
                 font-size: 16px;
                 outline: none;
-                transition: border-color 0.2s;
+                transition: all 0.2s;
+                background-color: #F9FAFB;
             }
             .form-group input:focus {
                 border-color: #3B82F6;
+                background-color: #FFFFFF;
+                box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+            }
+            .form-group input.invalid {
+                border-color: #EF4444;
+                background-color: #FEF2F2;
+            }
+            .error-text {
+                color: #EF4444;
+                font-size: 12px;
+                margin-top: 4px;
+                display: none;
+                font-weight: 500;
+            }
+            .form-group input.invalid + .error-text {
+                display: block;
             }
             .btn {
                 display: block;
@@ -2011,19 +2043,26 @@ async def view_connect_page(shop_code: str):
         <div class="container">
             <!-- Initial Form State -->
             <div id="formState">
-                <div class="icon-circle icon-shop">🏪</div>
+                <div class="icon-circle icon-shop">
+                    <img src="/static/icon-v3.png" alt="ShopMunim" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                    <span class="icon-emoji" style="display:none;">🏪</span>
+                </div>
                 <h1>Shop SHOP_NAME</h1>
                 CATEGORY_BADGE
                 <p class="desc">Join this shop on ShopMunim to view items, make requests, and track payments.</p>
                 
-                <form id="connectForm" onsubmit="handleConnect(event)">
+                <form id="connectForm" onsubmit="handleConnect(event)" novalidate>
                     <div class="form-group">
                         <label for="name">Your Name</label>
-                        <input type="text" id="name" placeholder="Enter your full name" required />
+                        <input type="text" id="name" placeholder="Enter your full name" required oninput="validateField(this)" />
+                        <span class="error-text">Please enter your name</span>
                     </div>
                     <div class="form-group">
                         <label for="phone">Phone Number</label>
-                        <input type="tel" id="phone" placeholder="10-digit phone number" pattern="[0-9]{10}" maxlength="10" required />
+                        <input type="tel" id="phone" placeholder="10-digit phone number" 
+                            pattern="[0-9]{10}" maxlength="10" required 
+                            oninput="this.value = this.value.replace(/[^0-9]/g, ''); validateField(this)" />
+                        <span class="error-text">Please enter a valid 10-digit number</span>
                     </div>
                     <button type="submit" class="btn btn-primary" id="submitBtn">Connect to Shop</button>
                 </form>
@@ -2031,7 +2070,9 @@ async def view_connect_page(shop_code: str):
 
             <!-- Success State -->
             <div id="successState" class="hidden">
-                <div class="icon-circle icon-success">✅</div>
+                <div class="icon-circle icon-success">
+                    <span class="icon-emoji">✅</span>
+                </div>
                 <h1>Connected!</h1>
                 <div class="success-box">
                     <p>You are now connected to <strong>Shop SHOP_NAME</strong> as a verified customer.</p>
@@ -2042,7 +2083,9 @@ async def view_connect_page(shop_code: str):
 
             <!-- Error State -->
             <div id="errorState" class="hidden">
-                <div class="icon-circle icon-error">⚠️</div>
+                <div class="icon-circle icon-error">
+                    <span class="icon-emoji">⚠️</span>
+                </div>
                 <h1>Already Connected</h1>
                 <div class="error-box">
                     <p id="errorMessage">This phone number is already connected as a customer.</p>
@@ -2053,16 +2096,39 @@ async def view_connect_page(shop_code: str):
         </div>
 
         <script>
+            function validateField(input) {
+                if (input.id === 'phone') {
+                    if (input.value.length === 10 && /^[0-9]+$/.test(input.value)) {
+                        input.classList.remove('invalid');
+                    } else if (input.value.length > 0) {
+                        input.classList.add('invalid');
+                    }
+                } else {
+                    if (input.value.trim().length > 0) {
+                        input.classList.remove('invalid');
+                    }
+                }
+            }
+
             async function handleConnect(e) {
                 e.preventDefault();
-                var name = document.getElementById('name').value.trim();
-                var phone = document.getElementById('phone').value.trim();
+                var nameInput = document.getElementById('name');
+                var phoneInput = document.getElementById('phone');
+                var name = nameInput.value.trim();
+                var phone = phoneInput.value.trim();
                 var btn = document.getElementById('submitBtn');
                 
-                if (!name || !phone || phone.length !== 10) {
-                    alert('Please enter your name and valid 10-digit phone number');
-                    return;
+                var isValid = true;
+                if (!name) {
+                    nameInput.classList.add('invalid');
+                    isValid = false;
                 }
+                if (phone.length !== 10) {
+                    phoneInput.classList.add('invalid');
+                    isValid = false;
+                }
+
+                if (!isValid) return;
                 
                 btn.disabled = true;
                 btn.innerHTML = '<span class="spinner"></span> Connecting...';
