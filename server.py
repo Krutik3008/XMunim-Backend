@@ -1551,15 +1551,18 @@ async def do_verify_customer(customer_id: str):
     customer = await db.customers.find_one({"id": customer_id})
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
-        
+    
+    shop = await db.shops.find_one({"id": customer.get("shop_id")})
+    shop_name = shop.get("name", "ShopMunim") if shop else "ShopMunim"
+    
     if customer.get("is_verified", False):
-        return {"success": True, "message": "Already verified"}
+        return {"success": True, "message": "Already verified", "shop_name": shop_name}
         
     await db.customers.update_one(
         {"id": customer_id},
         {"$set": {"is_verified": True}}
     )
-    return {"success": True, "message": "Customer successfully verified"}
+    return {"success": True, "message": "Customer successfully verified", "shop_name": shop_name}
 
 @api_router.post("/shops/{shop_id}/transactions", response_model=Transaction)
 async def create_transaction(shop_id: str, request: TransactionCreateRequest, current_user: User = Depends(get_current_user)):
