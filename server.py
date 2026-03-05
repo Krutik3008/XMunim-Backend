@@ -1331,6 +1331,30 @@ async def view_verify_customer(customer_id: str):
                     color: #1F2937;
                     font-weight: 600;
                 }
+                .verified-badge {
+                    display: none;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 6px;
+                    margin-top: 10px;
+                    padding: 8px 16px;
+                    background: linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%);
+                    border: 1px solid #6EE7B7;
+                    border-radius: 10px;
+                    color: #059669;
+                    font-size: 14px;
+                    font-weight: 600;
+                }
+                .verified-badge.show {
+                    display: flex;
+                }
+                .verified-badge .badge-icon {
+                    font-size: 16px;
+                }
+                .shop-box.verified {
+                    border-color: #6EE7B7;
+                    background-color: #F0FDF9;
+                }
                 .btn {
                     display: block;
                     width: 100%;
@@ -1479,8 +1503,10 @@ async def view_verify_customer(customer_id: str):
                             document.getElementById('icon-circle').className = 'icon-circle icon-success';
                             document.getElementById('icon-circle').innerText = '✓';
                             document.getElementById('header-title').innerText = 'Verification Successful!';
-                            document.getElementById('desc-text').innerText = 'Your account has been successfully verified.';
+                            document.getElementById('desc-text').innerText = 'Your Customer account has been successfully verified.';
                             document.getElementById('action-buttons').style.display = 'none';
+                            document.getElementById('shop-box').classList.add('verified');
+                            document.getElementById('verified-badge').classList.add('show');
                         } else {
                             showModal("Verification failed. Please try again.");
                             btn.disabled = false;
@@ -1507,16 +1533,17 @@ async def view_verify_customer(customer_id: str):
             <div class="container">
                 <div id="icon-circle" class="icon-circle icon-neutral">!</div>
                 <h1 id="header-title">Verify Account</h1>
-                <p id="desc-text" class="desc">Open the app to verify your account, or verify here in the browser.</p>
+                <p id="desc-text" class="desc">Open the app to verify your customer account, or verify here in the browser.</p>
                 
-                <div class="shop-box">
+                <div id="shop-box" class="shop-box">
                     <span class="shop-label">Verify For</span>
                     <span class="shop-name">{{SHOP_NAME}}</span>
+                    <div id="verified-badge" class="verified-badge">
+                        <span class="badge-icon">✓</span> Verified
+                    </div>
                 </div>
                 
-                <div id="action-buttons">
-                    <button onclick="openApp()" class="btn btn-primary">Open ShopMunim App</button>
-                    
+                <div id="action-buttons">                    
                     <div class="divider"></div>
                     <p class="section-label">Or verify immediately</p>
                     <button onclick="verifyInBrowser()" class="btn btn-success">Verify in Browser</button>
