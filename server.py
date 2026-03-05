@@ -1262,73 +1262,67 @@ async def view_verify_customer(customer_id: str):
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Account Verification - ShopMunim</title>
             <style>
+                * { box-sizing: border-box; margin: 0; padding: 0; }
                 body {
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                    margin: 0;
-                    padding: 0;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                     min-height: 100vh;
-                    background-color: #F3F4F6;
+                    background: linear-gradient(135deg, #EEF2FF 0%, #F3F4F6 50%, #ECFDF5 100%);
                 }
                 .container {
                     background-color: #FFFFFF;
                     border-radius: 24px;
-                    padding: 40px 20px;
-                    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+                    padding: 40px 24px;
+                    box-shadow: 0 20px 60px -12px rgba(0, 0, 0, 0.12);
                     text-align: center;
-                    max-width: 400px;
-                    width: 90%;
+                    max-width: 420px;
+                    width: 92%;
                 }
-                .neutral-icon {
-                    background-color: #E5E7EB;
-                    color: #6B7280;
-                    width: 80px;
-                    height: 80px;
-                    border-radius: 40px;
+                .icon-circle {
+                    width: 88px;
+                    height: 88px;
+                    border-radius: 50%;
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    font-size: 40px;
+                    font-size: 42px;
                     margin: 0 auto 24px auto;
+                    transition: all 0.5s ease;
                 }
-                .success-icon {
-                    background-color: #D1FAE5;
-                    color: #10B981;
-                    width: 80px;
-                    height: 80px;
-                    border-radius: 40px;
-                    display: none;
-                    align-items: center;
-                    justify-content: center;
-                    font-size: 40px;
-                    margin: 0 auto 24px auto;
+                .icon-neutral {
+                    background: linear-gradient(135deg, #E5E7EB 0%, #D1D5DB 100%);
+                    color: #6B7280;
+                }
+                .icon-success {
+                    background: linear-gradient(135deg, #A7F3D0 0%, #6EE7B7 100%);
+                    color: #059669;
                 }
                 h1 {
                     color: #111827;
                     font-size: 24px;
-                    margin: 0 0 12px 0;
+                    margin: 0 0 8px 0;
                     font-weight: 700;
                 }
-                p {
+                .desc {
                     color: #6B7280;
-                    font-size: 16px;
-                    line-height: 1.6;
-                    margin-bottom: 20px;
+                    font-size: 15px;
+                    line-height: 1.5;
+                    margin-bottom: 24px;
                 }
                 .shop-box {
                     background-color: #F9FAFB;
                     border: 1px solid #E5E7EB;
-                    border-radius: 12px;
+                    border-radius: 14px;
                     padding: 16px;
-                    margin-bottom: 24px;
+                    margin-bottom: 28px;
                 }
                 .shop-label {
-                    font-size: 12px;
+                    font-size: 11px;
                     color: #9CA3AF;
                     text-transform: uppercase;
-                    letter-spacing: 0.05em;
+                    letter-spacing: 0.08em;
                     margin-bottom: 4px;
                     display: block;
                 }
@@ -1337,67 +1331,111 @@ async def view_verify_customer(customer_id: str):
                     color: #1F2937;
                     font-weight: 600;
                 }
-                .footer {
+                .btn {
+                    display: block;
+                    width: 100%;
+                    padding: 14px 24px;
+                    border-radius: 12px;
+                    font-weight: 600;
+                    font-size: 15px;
+                    border: none;
+                    cursor: pointer;
+                    font-family: inherit;
+                    text-align: center;
+                    text-decoration: none;
+                    transition: transform 0.15s ease, box-shadow 0.15s ease;
+                }
+                .btn:active { transform: scale(0.97); }
+                .btn-primary {
+                    background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+                    color: white;
+                    box-shadow: 0 4px 14px -3px rgba(59, 130, 246, 0.5);
+                    margin-bottom: 12px;
+                }
+                .btn-success {
+                    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+                    color: white;
+                    box-shadow: 0 4px 14px -3px rgba(16, 185, 129, 0.5);
+                }
+                .btn-dark {
+                    background: linear-gradient(135deg, #1F2937 0%, #111827 100%);
+                    color: white;
+                    padding: 12px 16px;
+                    font-size: 13px;
+                    flex: 1;
+                }
+                .section-label {
+                    font-size: 13px;
                     color: #9CA3AF;
-                    font-size: 14px;
+                    margin: 20px 0 10px 0;
                 }
-                .app-btn {
-                    display: inline-block;
-                    background-color: #3B82F6;
-                    color: white;
-                    padding: 12px 24px;
-                    border-radius: 8px;
-                    text-decoration: none;
-                    font-weight: 600;
-                    margin-top: 10px;
-                    width: 80%;
-                    border: none;
-                    cursor: pointer;
-                    font-family: inherit;
+                .divider {
+                    height: 1px;
+                    background-color: #F3F4F6;
+                    margin: 20px 0;
                 }
-                .verify-btn {
-                    display: inline-block;
-                    background-color: #10B981;
-                    color: white;
-                    padding: 12px 24px;
-                    border-radius: 8px;
-                    text-decoration: none;
-                    font-weight: 600;
-                    margin-top: 10px;
-                    width: 80%;
-                    border: none;
-                    cursor: pointer;
-                    font-family: inherit;
-                }
-                .store-btn {
-                    display: inline-block;
-                    background-color: #111827;
-                    color: white;
-                    padding: 10px 16px;
-                    border-radius: 8px;
-                    text-decoration: none;
-                    font-size: 14px;
-                    font-weight: 600;
-                    margin: 5px;
-                    width: 40%;
-                    box-sizing: border-box;
-                    cursor: pointer;
-                    border: none;
-                    font-family: inherit;
-                }
-                .store-buttons {
+                .store-row {
                     display: flex;
-                    flex-direction: row;
-                    justify-content: center;
                     gap: 10px;
-                    margin-top: 15px;
+                    margin-top: 10px;
+                }
+                .footer {
+                    color: #D1D5DB;
+                    font-size: 13px;
+                    margin-top: 28px;
+                }
+                .footer strong { color: #9CA3AF; }
+
+                /* Custom Modal */
+                .modal-overlay {
+                    display: none;
+                    position: fixed;
+                    top: 0; left: 0; right: 0; bottom: 0;
+                    background: rgba(0,0,0,0.4);
+                    z-index: 100;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .modal-overlay.active { display: flex; }
+                .modal-box {
+                    background: white;
+                    border-radius: 20px;
+                    padding: 28px 24px;
+                    max-width: 320px;
+                    width: 85%;
+                    text-align: center;
+                    box-shadow: 0 25px 60px -12px rgba(0,0,0,0.25);
+                }
+                .modal-title {
+                    font-size: 17px;
+                    font-weight: 700;
+                    color: #111827;
+                    margin-bottom: 8px;
+                }
+                .modal-msg {
+                    font-size: 15px;
+                    color: #6B7280;
+                    line-height: 1.5;
+                    margin-bottom: 20px;
+                }
+                .modal-ok-btn {
+                    background: linear-gradient(135deg, #3B82F6, #2563EB);
+                    color: white;
+                    border: none;
+                    padding: 12px 40px;
+                    border-radius: 10px;
+                    font-weight: 600;
+                    font-size: 15px;
+                    cursor: pointer;
+                    font-family: inherit;
                 }
             </style>
             <script>
+                var autoOpenTimer = null;
+
                 // Attempt to open the app via deep link after UI is visible.
                 function openApp() {
                     var deepLink = "shopmunim://verify-customer/{{CUSTOMER_ID}}";
-                    // Use intent:// for Chrome on Android, with fallback to stay on this page if app not installed
                     var fallbackUrl = encodeURIComponent(window.location.href);
                     var intentUrl = "intent://verify-customer/{{CUSTOMER_ID}}#Intent;scheme=shopmunim;package=com.krutik3011.ShopMunimApp;S.browser_fallback_url=" + fallbackUrl + ";end";
                     
@@ -1408,36 +1446,48 @@ async def view_verify_customer(customer_id: str):
                         window.location.href = deepLink;
                     }
                 }
-                setTimeout(openApp, 1500);
+                autoOpenTimer = setTimeout(openApp, 1500);
                 
+                function showModal(msg) {
+                    document.getElementById('modal-message').innerText = msg;
+                    document.getElementById('custom-modal').classList.add('active');
+                }
+
+                function closeModal() {
+                    document.getElementById('custom-modal').classList.remove('active');
+                }
+
                 function showComingSoon(platform) {
-                    alert(platform + " App is coming very soon!");
+                    showModal(platform + " app is coming very soon! Stay tuned.");
                 }
 
                 async function verifyInBrowser() {
-                    const btn = document.querySelector('.verify-btn');
+                    // Cancel auto-redirect
+                    if (autoOpenTimer) { clearTimeout(autoOpenTimer); autoOpenTimer = null; }
+                    
+                    var btn = document.querySelector('.btn-success');
                     btn.disabled = true;
                     btn.innerText = 'Verifying...';
                     
                     try {
-                        const response = await fetch('/api/public/verify-customer/{{CUSTOMER_ID}}', {
+                        var response = await fetch('/api/public/verify-customer/{{CUSTOMER_ID}}', {
                             method: 'POST'
                         });
-                        const data = await response.json();
+                        var data = await response.json();
                         
                         if (data.success || data.message === "Already verified") {
-                            document.getElementById('neutral-icon').style.display = 'none';
-                            document.getElementById('success-icon').style.display = 'flex';
+                            document.getElementById('icon-circle').className = 'icon-circle icon-success';
+                            document.getElementById('icon-circle').innerText = '✓';
                             document.getElementById('header-title').innerText = 'Verification Successful!';
-                            document.getElementById('desc-text').innerText = 'Your account has been successfully verified via browser.';
+                            document.getElementById('desc-text').innerText = 'Your account has been successfully verified.';
                             document.getElementById('action-buttons').style.display = 'none';
                         } else {
-                            alert("Verification failed. Please try again.");
+                            showModal("Verification failed. Please try again.");
                             btn.disabled = false;
                             btn.innerText = 'Verify in Browser';
                         }
                     } catch (error) {
-                        alert("Verification failed. Please try again.");
+                        showModal("Verification failed. Please try again.");
                         btn.disabled = false;
                         btn.innerText = 'Verify in Browser';
                     }
@@ -1445,34 +1495,41 @@ async def view_verify_customer(customer_id: str):
             </script>
         </head>
         <body>
+            <!-- Custom Modal (replaces alert) -->
+            <div id="custom-modal" class="modal-overlay" onclick="closeModal()">
+                <div class="modal-box" onclick="event.stopPropagation()">
+                    <div class="modal-title">ShopMunim App</div>
+                    <div id="modal-message" class="modal-msg"></div>
+                    <button class="modal-ok-btn" onclick="closeModal()">OK</button>
+                </div>
+            </div>
+
             <div class="container">
-                <div id="neutral-icon" class="neutral-icon">!</div>
-                <div id="success-icon" class="success-icon">✓</div>
+                <div id="icon-circle" class="icon-circle icon-neutral">!</div>
                 <h1 id="header-title">Verify Account</h1>
-                <p id="desc-text">Open the app to verify your account, or verify here.</p>
+                <p id="desc-text" class="desc">Open the app to verify your account, or verify here in the browser.</p>
                 
                 <div class="shop-box">
                     <span class="shop-label">Verify For</span>
-                    <span class="shop-name">Shop {{SHOP_NAME}}</span>
+                    <span class="shop-name">{{SHOP_NAME}}</span>
                 </div>
                 
                 <div id="action-buttons">
-                    <p style="font-size: 14px; margin-bottom: 10px; margin-top: 0">Got the App?</p>
-                    <button onclick="openApp()" class="app-btn">Open ShopMunim App</button>
+                    <button onclick="openApp()" class="btn btn-primary">Open ShopMunim App</button>
                     
-                    <p style="font-size: 14px; margin-bottom: 10px; margin-top: 20px;">Or verify immediately:</p>
-                    <button onclick="verifyInBrowser()" class="verify-btn">Verify in Browser</button>
+                    <div class="divider"></div>
+                    <p class="section-label">Or verify immediately</p>
+                    <button onclick="verifyInBrowser()" class="btn btn-success">Verify in Browser</button>
                     
-                    <div style="margin-top: 30px;">
-                        <p style="font-size: 13px; color: #6B7280; margin-bottom: 5px;">Don't have the app?</p>
-                        <div class="store-buttons">
-                            <button onclick="showComingSoon('Play Store')" class="store-btn">Google Play</button>
-                            <button onclick="showComingSoon('App Store')" class="store-btn">App Store</button>
-                        </div>
+                    <div class="divider"></div>
+                    <p class="section-label">Don't have the app?</p>
+                    <div class="store-row">
+                        <button onclick="showComingSoon('Google Play')" class="btn btn-dark">Google Play</button>
+                        <button onclick="showComingSoon('App Store')" class="btn btn-dark">App Store</button>
                     </div>
                 </div>
                 
-                <div style="margin-top: 30px;" class="footer">
+                <div class="footer">
                     Powered by <strong>ShopMunim</strong>
                 </div>
             </div>
