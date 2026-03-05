@@ -1231,239 +1231,248 @@ async def send_verification_link(shop_id: str, customer_id: str, current_user: U
 @api_router.get("/public/verify-customer/{customer_id}")
 async def view_verify_customer(customer_id: str):
     """Public endpoint to view the customer verification page"""
-    customer = await db.customers.find_one({"id": customer_id})
-    if not customer:
-        return HTMLResponse(
-            content="""
-            <html>
-                <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background-color: #fce8e8;">
-                    <div style="text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                        <h1 style="color: #c53030; margin-bottom: 10px;">Customer Not Found</h1>
-                        <p style="color: #666;">We couldn't find a customer with that ID.</p>
-                    </div>
-                </body>
-            </html>
-            """, 
-            status_code=404
-        )
-    
-    shop = await db.shops.find_one({"id": customer["shop_id"]})
-    shop_name = shop["name"] if shop else "ShopMunim"
-    
-    html_template = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Account Verification - ShopMunim</title>
-        <style>
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 100vh;
-                background-color: #F3F4F6;
-            }
-            .container {
-                background-color: #FFFFFF;
-                border-radius: 24px;
-                padding: 40px 20px;
-                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-                text-align: center;
-                max-width: 400px;
-                width: 90%;
-            }
-            .neutral-icon {
-                background-color: #E5E7EB;
-                color: #6B7280;
-                width: 80px;
-                height: 80px;
-                border-radius: 40px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 40px;
-                margin: 0 auto 24px auto;
-            }
-            .success-icon {
-                background-color: #D1FAE5;
-                color: #10B981;
-                width: 80px;
-                height: 80px;
-                border-radius: 40px;
-                display: none;
-                align-items: center;
-                justify-content: center;
-                font-size: 40px;
-                margin: 0 auto 24px auto;
-            }
-            h1 {
-                color: #111827;
-                font-size: 24px;
-                margin: 0 0 12px 0;
-                font-weight: 700;
-            }
-            p {
-                color: #6B7280;
-                font-size: 16px;
-                line-height: 1.6;
-                margin-bottom: 20px;
-            }
-            .shop-box {
-                background-color: #F9FAFB;
-                border: 1px solid #E5E7EB;
-                border-radius: 12px;
-                padding: 16px;
-                margin-bottom: 24px;
-            }
-            .shop-label {
-                font-size: 12px;
-                color: #9CA3AF;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                margin-bottom: 4px;
-                display: block;
-            }
-            .shop-name {
-                font-size: 18px;
-                color: #1F2937;
-                font-weight: 600;
-            }
-            .footer {
-                color: #9CA3AF;
-                font-size: 14px;
-            }
-            .app-btn {
-                display: inline-block;
-                background-color: #3B82F6;
-                color: white;
-                padding: 12px 24px;
-                border-radius: 8px;
-                text-decoration: none;
-                font-weight: 600;
-                margin-top: 10px;
-                width: 80%;
-                border: none;
-                cursor: pointer;
-                font-family: inherit;
-            }
-            .verify-btn {
-                display: inline-block;
-                background-color: #10B981;
-                color: white;
-                padding: 12px 24px;
-                border-radius: 8px;
-                text-decoration: none;
-                font-weight: 600;
-                margin-top: 10px;
-                width: 80%;
-                border: none;
-                cursor: pointer;
-                font-family: inherit;
-            }
-            .store-btn {
-                display: inline-block;
-                background-color: #111827;
-                color: white;
-                padding: 10px 16px;
-                border-radius: 8px;
-                text-decoration: none;
-                font-size: 14px;
-                font-weight: 600;
-                margin: 5px;
-                width: 40%;
-                box-sizing: border-box;
-                cursor: pointer;
-                border: none;
-                font-family: inherit;
-            }
-            .store-buttons {
-                display: flex;
-                flex-direction: row;
-                justify-content: center;
-                gap: 10px;
-                margin-top: 15px;
-            }
-        </style>
-        <script>
-            // Attempt to open the app via deep link.
-            window.location.href = "shopmunim://verify-customer/{{CUSTOMER_ID}}";
-            
-            function showComingSoon(platform) {
-                alert(platform + " App is coming very soon!");
-            }
-
-            async function verifyInBrowser() {
-                const btn = document.querySelector('.verify-btn');
-                btn.disabled = true;
-                btn.innerText = 'Verifying...';
+    logger.info(f"Verification page requested for customer: {customer_id}")
+    try:
+        customer = await db.customers.find_one({"id": customer_id})
+        if not customer:
+            logger.warning(f"Customer not found for verification: {customer_id}")
+            return HTMLResponse(
+                content="""
+                <html>
+                    <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background-color: #fce8e8;">
+                        <div style="text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <h1 style="color: #c53030; margin-bottom: 10px;">Customer Not Found</h1>
+                            <p style="color: #666;">We couldn't find a customer with that ID.</p>
+                        </div>
+                    </body>
+                </html>
+                """, 
+                status_code=404
+            )
+        
+        shop = await db.shops.find_one({"id": customer.get("shop_id")})
+        shop_name = shop.get("name", "ShopMunim") if shop else "ShopMunim"
+        logger.info(f"Found customer {customer.get('name')} for shop {shop_name}")
+        
+        html_template = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Account Verification - ShopMunim</title>
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    min-height: 100vh;
+                    background-color: #F3F4F6;
+                }
+                .container {
+                    background-color: #FFFFFF;
+                    border-radius: 24px;
+                    padding: 40px 20px;
+                    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+                    text-align: center;
+                    max-width: 400px;
+                    width: 90%;
+                }
+                .neutral-icon {
+                    background-color: #E5E7EB;
+                    color: #6B7280;
+                    width: 80px;
+                    height: 80px;
+                    border-radius: 40px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 40px;
+                    margin: 0 auto 24px auto;
+                }
+                .success-icon {
+                    background-color: #D1FAE5;
+                    color: #10B981;
+                    width: 80px;
+                    height: 80px;
+                    border-radius: 40px;
+                    display: none;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 40px;
+                    margin: 0 auto 24px auto;
+                }
+                h1 {
+                    color: #111827;
+                    font-size: 24px;
+                    margin: 0 0 12px 0;
+                    font-weight: 700;
+                }
+                p {
+                    color: #6B7280;
+                    font-size: 16px;
+                    line-height: 1.6;
+                    margin-bottom: 20px;
+                }
+                .shop-box {
+                    background-color: #F9FAFB;
+                    border: 1px solid #E5E7EB;
+                    border-radius: 12px;
+                    padding: 16px;
+                    margin-bottom: 24px;
+                }
+                .shop-label {
+                    font-size: 12px;
+                    color: #9CA3AF;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                    margin-bottom: 4px;
+                    display: block;
+                }
+                .shop-name {
+                    font-size: 18px;
+                    color: #1F2937;
+                    font-weight: 600;
+                }
+                .footer {
+                    color: #9CA3AF;
+                    font-size: 14px;
+                }
+                .app-btn {
+                    display: inline-block;
+                    background-color: #3B82F6;
+                    color: white;
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    text-decoration: none;
+                    font-weight: 600;
+                    margin-top: 10px;
+                    width: 80%;
+                    border: none;
+                    cursor: pointer;
+                    font-family: inherit;
+                }
+                .verify-btn {
+                    display: inline-block;
+                    background-color: #10B981;
+                    color: white;
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    text-decoration: none;
+                    font-weight: 600;
+                    margin-top: 10px;
+                    width: 80%;
+                    border: none;
+                    cursor: pointer;
+                    font-family: inherit;
+                }
+                .store-btn {
+                    display: inline-block;
+                    background-color: #111827;
+                    color: white;
+                    padding: 10px 16px;
+                    border-radius: 8px;
+                    text-decoration: none;
+                    font-size: 14px;
+                    font-weight: 600;
+                    margin: 5px;
+                    width: 40%;
+                    box-sizing: border-box;
+                    cursor: pointer;
+                    border: none;
+                    font-family: inherit;
+                }
+                .store-buttons {
+                    display: flex;
+                    flex-direction: row;
+                    justify-content: center;
+                    gap: 10px;
+                    margin-top: 15px;
+                }
+            </style>
+            <script>
+                // Attempt to open the app via deep link after UI is visible.
+                setTimeout(function() {
+                    window.location.href = "shopmunim://verify-customer/{{CUSTOMER_ID}}";
+                }, 1500);
                 
-                try {
-                    const response = await fetch('/api/public/verify-customer/{{CUSTOMER_ID}}', {
-                        method: 'POST'
-                    });
-                    const data = await response.json();
+                function showComingSoon(platform) {
+                    alert(platform + " App is coming very soon!");
+                }
+
+                async function verifyInBrowser() {
+                    const btn = document.querySelector('.verify-btn');
+                    btn.disabled = true;
+                    btn.innerText = 'Verifying...';
                     
-                    if (data.success || data.message === "Already verified") {
-                        document.getElementById('neutral-icon').style.display = 'none';
-                        document.getElementById('success-icon').style.display = 'flex';
-                        document.getElementById('header-title').innerText = 'Verification Successful!';
-                        document.getElementById('desc-text').innerText = 'Your account has been successfully verified via browser.';
-                        document.getElementById('action-buttons').style.display = 'none';
-                    } else {
+                    try {
+                        const response = await fetch('/api/public/verify-customer/{{CUSTOMER_ID}}', {
+                            method: 'POST'
+                        });
+                        const data = await response.json();
+                        
+                        if (data.success || data.message === "Already verified") {
+                            document.getElementById('neutral-icon').style.display = 'none';
+                            document.getElementById('success-icon').style.display = 'flex';
+                            document.getElementById('header-title').innerText = 'Verification Successful!';
+                            document.getElementById('desc-text').innerText = 'Your account has been successfully verified via browser.';
+                            document.getElementById('action-buttons').style.display = 'none';
+                        } else {
+                            alert("Verification failed. Please try again.");
+                            btn.disabled = false;
+                            btn.innerText = 'Verify in Browser';
+                        }
+                    } catch (error) {
                         alert("Verification failed. Please try again.");
                         btn.disabled = false;
                         btn.innerText = 'Verify in Browser';
                     }
-                } catch (error) {
-                    alert("Verification failed. Please try again.");
-                    btn.disabled = false;
-                    btn.innerText = 'Verify in Browser';
                 }
-            }
-        </script>
-    </head>
-    <body>
-        <div class="container">
-            <div id="neutral-icon" class="neutral-icon">!</div>
-            <div id="success-icon" class="success-icon">✓</div>
-            <h1 id="header-title">Verify Account</h1>
-            <p id="desc-text">Open the app to verify your account, or verify here.</p>
-            
-            <div class="shop-box">
-                <span class="shop-label">Verify For</span>
-                <span class="shop-name">Shop {{SHOP_NAME}}</span>
-            </div>
-            
-            <div id="action-buttons">
-                <p style="font-size: 14px; margin-bottom: 10px; margin-top: 0">Got the App?</p>
-                <a href="shopmunim://verify-customer/{{CUSTOMER_ID}}" class="app-btn">Open ShopMunim App</a>
+            </script>
+        </head>
+        <body>
+            <div class="container">
+                <div id="neutral-icon" class="neutral-icon">!</div>
+                <div id="success-icon" class="success-icon">✓</div>
+                <h1 id="header-title">Verify Account</h1>
+                <p id="desc-text">Open the app to verify your account, or verify here.</p>
                 
-                <p style="font-size: 14px; margin-bottom: 10px; margin-top: 20px;">Or verify immediately:</p>
-                <button onclick="verifyInBrowser()" class="verify-btn">Verify in Browser</button>
+                <div class="shop-box">
+                    <span class="shop-label">Verify For</span>
+                    <span class="shop-name">Shop {{SHOP_NAME}}</span>
+                </div>
                 
-                <div style="margin-top: 30px;">
-                    <p style="font-size: 13px; color: #6B7280; margin-bottom: 5px;">Don't have the app?</p>
-                    <div class="store-buttons">
-                        <button onclick="showComingSoon('Play Store')" class="store-btn">Google Play</button>
-                        <button onclick="showComingSoon('App Store')" class="store-btn">App Store</button>
+                <div id="action-buttons">
+                    <p style="font-size: 14px; margin-bottom: 10px; margin-top: 0">Got the App?</p>
+                    <a href="shopmunim://verify-customer/{{CUSTOMER_ID}}" class="app-btn">Open ShopMunim App</a>
+                    
+                    <p style="font-size: 14px; margin-bottom: 10px; margin-top: 20px;">Or verify immediately:</p>
+                    <button onclick="verifyInBrowser()" class="verify-btn">Verify in Browser</button>
+                    
+                    <div style="margin-top: 30px;">
+                        <p style="font-size: 13px; color: #6B7280; margin-bottom: 5px;">Don't have the app?</p>
+                        <div class="store-buttons">
+                            <button onclick="showComingSoon('Play Store')" class="store-btn">Google Play</button>
+                            <button onclick="showComingSoon('App Store')" class="store-btn">App Store</button>
+                        </div>
                     </div>
                 </div>
+                
+                <div style="margin-top: 30px;" class="footer">
+                    Powered by <strong>ShopMunim</strong>
+                </div>
             </div>
-            
-            <div style="margin-top: 30px;" class="footer">
-                Powered by <strong>ShopMunim</strong>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    html_content = html_template.replace("{{CUSTOMER_ID}}", customer_id).replace("{{SHOP_NAME}}", shop_name)
-    return HTMLResponse(content=html_content)
+        </body>
+        </html>
+        """
+        html_content = html_template.replace("{{CUSTOMER_ID}}", customer_id).replace("{{SHOP_NAME}}", shop_name)
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.error(f"Error serving verification page: {e}")
+        return HTMLResponse(content=f"<html><body><h1>Internal Server Error</h1><p>{str(e)}</p></body></html>", status_code=500)
 
 @api_router.post("/public/verify-customer/{customer_id}")
 async def do_verify_customer(customer_id: str):
