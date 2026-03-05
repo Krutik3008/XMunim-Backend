@@ -1229,10 +1229,11 @@ async def send_verification_link(shop_id: str, customer_id: str, current_user: U
     }
 
 @api_router.get("/public/verify-customer/{customer_id}")
-async def verify_customer(customer_id: str):
-    """Public endpoint to verify a customer with a user-friendly HTML page"""
+async def view_verify_customer(customer_id: str):
+    """Public endpoint to view the customer verification page"""
     customer = await db.customers.find_one({"id": customer_id})
     if not customer:
+        ... # Keep existing 404 block
         return HTMLResponse(
             content="""
             <html>
@@ -1247,49 +1248,225 @@ async def verify_customer(customer_id: str):
     shop = await db.shops.find_one({"id": customer["shop_id"]})
     shop_name = shop["name"] if shop else "ShopMunim"
     
-    await db.customers.update_one(
-        {"id": customer_id},
-        {"$set": {"is_verified": True}}
-    )
-    
     html_content = f"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Verifying... - ShopMunim</title>
+        <title>Account Verification - ShopMunim</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                background-color: #F3F4F6;
+            }}
+            .container {{
+                background-color: #FFFFFF;
+                border-radius: 24px;
+                padding: 40px 20px;
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+                text-align: center;
+                max-width: 400px;
+                width: 90%;
+            }}
+            .neutral-icon {{
+                background-color: #E5E7EB;
+                color: #6B7280;
+                width: 80px;
+                height: 80px;
+                border-radius: 40px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 40px;
+                margin: 0 auto 24px auto;
+            }}
+            .success-icon {{
+                background-color: #D1FAE5;
+                color: #10B981;
+                width: 80px;
+                height: 80px;
+                border-radius: 40px;
+                display: none;
+                align-items: center;
+                justify-content: center;
+                font-size: 40px;
+                margin: 0 auto 24px auto;
+            }}
+            h1 {{
+                color: #111827;
+                font-size: 24px;
+                margin: 0 0 12px 0;
+                font-weight: 700;
+            }}
+            p {{
+                color: #6B7280;
+                font-size: 16px;
+                line-height: 1.6;
+                margin-bottom: 20px;
+            }}
+            .shop-box {{
+                background-color: #F9FAFB;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
+                padding: 16px;
+                margin-bottom: 24px;
+            }}
+            .shop-label {{
+                font-size: 12px;
+                color: #9CA3AF;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                margin-bottom: 4px;
+                display: block;
+            }}
+            .shop-name {{
+                font-size: 18px;
+                color: #1F2937;
+                font-weight: 600;
+            }}
+            .footer {{
+                color: #9CA3AF;
+                font-size: 14px;
+            }}
+            .app-btn {{
+                display: inline-block;
+                background-color: #3B82F6;
+                color: white;
+                padding: 12px 24px;
+                border-radius: 8px;
+                text-decoration: none;
+                font-weight: 600;
+                margin-top: 10px;
+                width: 80%;
+                border: none;
+                cursor: pointer;
+            }}
+            .verify-btn {{
+                display: inline-block;
+                background-color: #10B981;
+                color: white;
+                padding: 12px 24px;
+                border-radius: 8px;
+                text-decoration: none;
+                font-weight: 600;
+                margin-top: 10px;
+                width: 80%;
+                border: none;
+                cursor: pointer;
+            }}
+            .store-btn {{
+                display: inline-block;
+                background-color: #111827;
+                color: white;
+                padding: 10px 16px;
+                border-radius: 8px;
+                text-decoration: none;
+                font-size: 14px;
+                font-weight: 600;
+                margin: 5px;
+                width: 40%;
+                box-sizing: border-box;
+                cursor: pointer;
+                border: none;
+            }}
+            .store-buttons {{
+                display: flex;
+                flex-direction: row;
+                justify-content: center;
+                gap: 10px;
+                margin-top: 15px;
+            }}
+        </style>
         <script>
-            // App Store URLs
-            var playStoreUrl = "https://play.google.com/store/apps/details?id=com.krutik3011.ShopMunimApp";
-            
-            // Detect iOS
-            var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-            var fallbackUrl = isIOS ? "https://apps.apple.com" : playStoreUrl; // Default to Apple App Store root if no explicit ID is available
-
-            // Attempt to open the app via deep link
-            var now = Date.now();
-            setTimeout(function() {{
-                // If 1.5 seconds later the browser is still here (now check implies user didn't switch apps), 
-                // redirect them to the app store.
-                if (Date.now() - now < 2000) {{
-                    window.location.href = fallbackUrl;
-                }}
-            }}, 1500);
-
-            // Execute the deep link to the app
+            // Attempt to open the app via deep link. 
+            // In the app, it will hit the explicit verification endpoint.
             window.location.href = "shopmunim://verify-customer/{customer_id}";
+            
+            function showComingSoon(platform) {{
+                alert(platform + " App is coming very soon!");
+            }}
+
+            async function verifyInBrowser() {{
+                try {{
+                    const response = await fetch('/api/public/verify-customer/{customer_id}', {{
+                        method: 'POST'
+                    }});
+                    const data = await response.json();
+                    
+                    if (data.success || data.message === "Already verified") {{
+                        document.getElementById('neutral-icon').style.display = 'none';
+                        document.getElementById('success-icon').style.display = 'flex';
+                        document.getElementById('header-title').innerText = 'Verification Successful!';
+                        document.getElementById('desc-text').innerText = 'Your account has been successfully verified via browser.';
+                        document.getElementById('action-buttons').style.display = 'none';
+                    }} else {{
+                        alert("Verification failed. Please try again.");
+                    }}
+                }} catch (error) {{
+                    alert("Verification failed. Please try again.");
+                }}
+            }}
         </script>
     </head>
-    <body style="background-color: #F3F4F6; margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif;">
-        <div style="text-align: center;">
-            <p style="color: #6B7280; font-size: 16px;">Redirecting you to the ShopMunim app...</p>
-            <p style="color: #9CA3AF; font-size: 12px; margin-top: 10px;">If not redirected automatically, downloading the app is required.</p>
+    <body>
+        <div class="container">
+            <div id="neutral-icon" class="neutral-icon">!</div>
+            <div id="success-icon" class="success-icon">✓</div>
+            <h1 id="header-title">Verify Account</h1>
+            <p id="desc-text">Open the app to verify your account, or verify here.</p>
+            
+            <div class="shop-box">
+                <span class="shop-label">Verify For</span>
+                <span class="shop-name">Shop {shop_name}</span>
+            </div>
+            
+            <div id="action-buttons">
+                <p style="font-size: 14px; margin-bottom: 10px; margin-top: 0">Got the App?</p>
+                <a href="shopmunim://verify-customer/{customer_id}" class="app-btn">Open ShopMunim App</a>
+                
+                <p style="font-size: 14px; margin-bottom: 10px; margin-top: 20px;">Or verify immediately:</p>
+                <button onclick="verifyInBrowser()" class="verify-btn">Verify in Browser</button>
+                
+                <div style="margin-top: 30px;">
+                    <p style="font-size: 13px; color: #6B7280; margin-bottom: 5px;">Don't have the app?</p>
+                    <div class="store-buttons">
+                        <button onclick="showComingSoon('Play Store')" class="store-btn">Google Play</button>
+                        <button onclick="showComingSoon('App Store')" class="store-btn">App Store</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 30px;" class="footer">
+                Powered by <strong>ShopMunim</strong>
+            </div>
         </div>
     </body>
     </html>
     """
     return HTMLResponse(content=html_content)
+
+@api_router.post("/public/verify-customer/{customer_id}")
+async def do_verify_customer(customer_id: str):
+    """Explicitly mark customer verified via API"""
+    customer = await db.customers.find_one({"id": customer_id})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+        
+    if customer.get("is_verified", False):
+        return {"success": True, "message": "Already verified"}
+        
+    await db.customers.update_one(
+        {"id": customer_id},
+        {"$set": {"is_verified": True}}
+    )
+    return {"success": True, "message": "Customer successfully verified"}
 
 @api_router.post("/shops/{shop_id}/transactions", response_model=Transaction)
 async def create_transaction(shop_id: str, request: TransactionCreateRequest, current_user: User = Depends(get_current_user)):
