@@ -1802,18 +1802,316 @@ async def connect_to_shop_public(shop_code: str, customer_data: dict):
     })
     
     if existing_customer:
-        raise HTTPException(status_code=409, detail="Customer already connected to this shop")
+        raise HTTPException(status_code=409, detail=f"This phone number is already connected as a customer to Shop {shop['name']}")
     
     customer = Customer(
         shop_id=shop["id"],
         name=customer_data["name"],
         phone=customer_data["phone"],
-        balance=0
+        balance=0,
+        is_verified=True
     )
     
     await db.customers.insert_one(prepare_for_mongo(customer.dict()))
     
-    return {"message": "Successfully connected to shop", "customer": customer}
+    return {"message": "Successfully connected to shop", "shop_name": shop["name"], "customer": customer}
+
+# ==================== Public Connect Page ====================
+
+@api_router.get("/public/connect/{shop_code}")
+async def view_connect_page(shop_code: str):
+    """Public HTML page for customers to connect to a shop via QR code/link"""
+    shop = await db.shops.find_one({"shop_code": shop_code})
+    if not shop:
+        return HTMLResponse(
+            content="""
+            <html>
+                <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background-color: #fce8e8;">
+                    <div style="text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <h1 style="color: #c53030; margin-bottom: 10px;">Shop Not Found</h1>
+                        <p style="color: #666;">This shop link is invalid or the shop no longer exists.</p>
+                    </div>
+                </body>
+            </html>
+            """,
+            status_code=404
+        )
+    
+    shop_name = shop.get("name", "Shop")
+    shop_category = shop.get("category", "")
+    
+    html_template = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Connect to Shop SHOP_NAME - ShopMunim</title>
+        <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+                background: linear-gradient(135deg, #EEF2FF 0%, #F3F4F6 50%, #ECFDF5 100%);
+            }
+            .container {
+                background-color: #FFFFFF;
+                border-radius: 24px;
+                padding: 40px 24px;
+                box-shadow: 0 20px 60px -12px rgba(0, 0, 0, 0.12);
+                text-align: center;
+                max-width: 420px;
+                width: 92%;
+            }
+            .icon-circle {
+                width: 88px;
+                height: 88px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 42px;
+                margin: 0 auto 24px auto;
+                transition: all 0.5s ease;
+            }
+            .icon-shop {
+                background: linear-gradient(135deg, #DBEAFE 0%, #93C5FD 100%);
+                color: #2563EB;
+            }
+            .icon-success {
+                background: linear-gradient(135deg, #A7F3D0 0%, #6EE7B7 100%);
+                color: #059669;
+            }
+            .icon-error {
+                background: linear-gradient(135deg, #FED7AA 0%, #FDBA74 100%);
+                color: #EA580C;
+            }
+            h1 {
+                color: #111827;
+                font-size: 24px;
+                margin: 0 0 8px 0;
+                font-weight: 700;
+            }
+            .category-badge {
+                display: inline-block;
+                background: #EEF2FF;
+                color: #6366F1;
+                font-size: 12px;
+                padding: 4px 14px;
+                border-radius: 20px;
+                margin: 4px 0 16px;
+            }
+            .desc {
+                color: #6B7280;
+                font-size: 15px;
+                margin-bottom: 24px;
+                line-height: 1.5;
+            }
+            .form-group {
+                margin-bottom: 16px;
+                text-align: left;
+            }
+            .form-group label {
+                display: block;
+                color: #374151;
+                font-size: 14px;
+                font-weight: 600;
+                margin-bottom: 6px;
+            }
+            .form-group input {
+                width: 100%;
+                padding: 12px 16px;
+                border: 2px solid #E5E7EB;
+                border-radius: 12px;
+                font-size: 16px;
+                outline: none;
+                transition: border-color 0.2s;
+            }
+            .form-group input:focus {
+                border-color: #3B82F6;
+            }
+            .btn {
+                display: block;
+                width: 100%;
+                padding: 14px;
+                border: none;
+                border-radius: 12px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+                margin-top: 8px;
+            }
+            .btn-primary {
+                background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+                color: #fff;
+            }
+            .btn-primary:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+            }
+            .btn-primary:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+                transform: none;
+            }
+            .success-box {
+                background: #ECFDF5;
+                border: 1px solid #A7F3D0;
+                border-radius: 12px;
+                padding: 16px;
+                margin-top: 16px;
+            }
+            .success-box p {
+                color: #065F46;
+                font-size: 14px;
+                line-height: 1.5;
+            }
+            .error-box {
+                background: #FFF7ED;
+                border: 1px solid #FDBA74;
+                border-radius: 12px;
+                padding: 16px;
+                margin-top: 16px;
+            }
+            .error-box p {
+                color: #9A3412;
+                font-size: 14px;
+                line-height: 1.5;
+            }
+            .branding {
+                margin-top: 24px;
+                color: #D1D5DB;
+                font-size: 12px;
+            }
+            .branding strong {
+                color: #9CA3AF;
+            }
+            .hidden { display: none; }
+            .spinner {
+                display: inline-block;
+                width: 18px;
+                height: 18px;
+                border: 3px solid rgba(255,255,255,0.3);
+                border-radius: 50%;
+                border-top-color: #fff;
+                animation: spin 0.8s linear infinite;
+                vertical-align: middle;
+                margin-right: 8px;
+            }
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <!-- Initial Form State -->
+            <div id="formState">
+                <div class="icon-circle icon-shop">🏪</div>
+                <h1>Shop SHOP_NAME</h1>
+                CATEGORY_BADGE
+                <p class="desc">Join this shop on ShopMunim to view items, make requests, and track payments.</p>
+                
+                <form id="connectForm" onsubmit="handleConnect(event)">
+                    <div class="form-group">
+                        <label for="name">Your Name</label>
+                        <input type="text" id="name" placeholder="Enter your full name" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="phone">Phone Number</label>
+                        <input type="tel" id="phone" placeholder="10-digit phone number" pattern="[0-9]{10}" maxlength="10" required />
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="submitBtn">Connect to Shop</button>
+                </form>
+            </div>
+
+            <!-- Success State -->
+            <div id="successState" class="hidden">
+                <div class="icon-circle icon-success">✅</div>
+                <h1>Connected!</h1>
+                <div class="success-box">
+                    <p>You are now connected to <strong>Shop SHOP_NAME</strong> as a verified customer.</p>
+                    <p style="margin-top:8px;">The shop owner can now see you in their customer list.</p>
+                </div>
+                <p class="branding">Powered by <strong>ShopMunim</strong></p>
+            </div>
+
+            <!-- Error State -->
+            <div id="errorState" class="hidden">
+                <div class="icon-circle icon-error">⚠️</div>
+                <h1>Already Connected</h1>
+                <div class="error-box">
+                    <p id="errorMessage">This phone number is already connected as a customer.</p>
+                </div>
+                <button class="btn btn-primary" style="margin-top:16px;" onclick="resetForm()">Try Another Number</button>
+                <p class="branding">Powered by <strong>ShopMunim</strong></p>
+            </div>
+        </div>
+
+        <script>
+            async function handleConnect(e) {
+                e.preventDefault();
+                var name = document.getElementById('name').value.trim();
+                var phone = document.getElementById('phone').value.trim();
+                var btn = document.getElementById('submitBtn');
+                
+                if (!name || !phone || phone.length !== 10) {
+                    alert('Please enter your name and valid 10-digit phone number');
+                    return;
+                }
+                
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner"></span> Connecting...';
+                
+                try {
+                    var response = await fetch('/api/shops/public/SHOP_CODE/connect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: name, phone: phone })
+                    });
+                    
+                    if (response.ok) {
+                        document.getElementById('formState').classList.add('hidden');
+                        document.getElementById('successState').classList.remove('hidden');
+                    } else if (response.status === 409) {
+                        var data = await response.json();
+                        document.getElementById('errorMessage').textContent = data.detail || 'This phone number is already connected as a customer.';
+                        document.getElementById('formState').classList.add('hidden');
+                        document.getElementById('errorState').classList.remove('hidden');
+                    } else {
+                        var errData = await response.json();
+                        alert(errData.detail || 'Something went wrong. Please try again.');
+                        btn.disabled = false;
+                        btn.textContent = 'Connect to Shop';
+                    }
+                } catch (err) {
+                    alert('Network error. Please check your connection and try again.');
+                    btn.disabled = false;
+                    btn.textContent = 'Connect to Shop';
+                }
+            }
+            
+            function resetForm() {
+                document.getElementById('errorState').classList.add('hidden');
+                document.getElementById('formState').classList.remove('hidden');
+                document.getElementById('phone').value = '';
+                document.getElementById('submitBtn').disabled = false;
+                document.getElementById('submitBtn').textContent = 'Connect to Shop';
+            }
+        </script>
+    </body>
+    </html>
+    """
+    
+    category_html = f'<span class="category-badge">{shop_category}</span>' if shop_category else ''
+    
+    html_content = html_template.replace("SHOP_NAME", shop_name).replace("SHOP_CODE", shop_code).replace("CATEGORY_BADGE", category_html)
+    
+    return HTMLResponse(content=html_content)
 
 # ==================== Admin Routes ====================
 
