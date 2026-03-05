@@ -1233,12 +1233,14 @@ async def view_verify_customer(customer_id: str):
     """Public endpoint to view the customer verification page"""
     customer = await db.customers.find_one({"id": customer_id})
     if not customer:
-        ... # Keep existing 404 block
         return HTMLResponse(
             content="""
             <html>
                 <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background-color: #fce8e8;">
-                    <h1 style="color: #c53030;">Customer Not Found</h1>
+                    <div style="text-align: center; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <h1 style="color: #c53030; margin-bottom: 10px;">Customer Not Found</h1>
+                        <p style="color: #666;">We couldn't find a customer with that ID.</p>
+                    </div>
                 </body>
             </html>
             """, 
@@ -1248,7 +1250,7 @@ async def view_verify_customer(customer_id: str):
     shop = await db.shops.find_one({"id": customer["shop_id"]})
     shop_name = shop["name"] if shop else "ShopMunim"
     
-    html_content = f"""
+    html_template = """
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -1256,17 +1258,17 @@ async def view_verify_customer(customer_id: str):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Account Verification - ShopMunim</title>
         <style>
-            body {{
+            body {
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                 margin: 0;
                 padding: 0;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                height: 100vh;
+                min-height: 100vh;
                 background-color: #F3F4F6;
-            }}
-            .container {{
+            }
+            .container {
                 background-color: #FFFFFF;
                 border-radius: 24px;
                 padding: 40px 20px;
@@ -1274,8 +1276,8 @@ async def view_verify_customer(customer_id: str):
                 text-align: center;
                 max-width: 400px;
                 width: 90%;
-            }}
-            .neutral-icon {{
+            }
+            .neutral-icon {
                 background-color: #E5E7EB;
                 color: #6B7280;
                 width: 80px;
@@ -1286,8 +1288,8 @@ async def view_verify_customer(customer_id: str):
                 justify-content: center;
                 font-size: 40px;
                 margin: 0 auto 24px auto;
-            }}
-            .success-icon {{
+            }
+            .success-icon {
                 background-color: #D1FAE5;
                 color: #10B981;
                 width: 80px;
@@ -1298,44 +1300,44 @@ async def view_verify_customer(customer_id: str):
                 justify-content: center;
                 font-size: 40px;
                 margin: 0 auto 24px auto;
-            }}
-            h1 {{
+            }
+            h1 {
                 color: #111827;
                 font-size: 24px;
                 margin: 0 0 12px 0;
                 font-weight: 700;
-            }}
-            p {{
+            }
+            p {
                 color: #6B7280;
                 font-size: 16px;
                 line-height: 1.6;
                 margin-bottom: 20px;
-            }}
-            .shop-box {{
+            }
+            .shop-box {
                 background-color: #F9FAFB;
                 border: 1px solid #E5E7EB;
                 border-radius: 12px;
                 padding: 16px;
                 margin-bottom: 24px;
-            }}
-            .shop-label {{
+            }
+            .shop-label {
                 font-size: 12px;
                 color: #9CA3AF;
                 text-transform: uppercase;
                 letter-spacing: 0.05em;
                 margin-bottom: 4px;
                 display: block;
-            }}
-            .shop-name {{
+            }
+            .shop-name {
                 font-size: 18px;
                 color: #1F2937;
                 font-weight: 600;
-            }}
-            .footer {{
+            }
+            .footer {
                 color: #9CA3AF;
                 font-size: 14px;
-            }}
-            .app-btn {{
+            }
+            .app-btn {
                 display: inline-block;
                 background-color: #3B82F6;
                 color: white;
@@ -1347,8 +1349,9 @@ async def view_verify_customer(customer_id: str):
                 width: 80%;
                 border: none;
                 cursor: pointer;
-            }}
-            .verify-btn {{
+                font-family: inherit;
+            }
+            .verify-btn {
                 display: inline-block;
                 background-color: #10B981;
                 color: white;
@@ -1360,8 +1363,9 @@ async def view_verify_customer(customer_id: str):
                 width: 80%;
                 border: none;
                 cursor: pointer;
-            }}
-            .store-btn {{
+                font-family: inherit;
+            }
+            .store-btn {
                 display: inline-block;
                 background-color: #111827;
                 color: white;
@@ -1375,44 +1379,52 @@ async def view_verify_customer(customer_id: str):
                 box-sizing: border-box;
                 cursor: pointer;
                 border: none;
-            }}
-            .store-buttons {{
+                font-family: inherit;
+            }
+            .store-buttons {
                 display: flex;
                 flex-direction: row;
                 justify-content: center;
                 gap: 10px;
                 margin-top: 15px;
-            }}
+            }
         </style>
         <script>
-            // Attempt to open the app via deep link. 
-            // In the app, it will hit the explicit verification endpoint.
-            window.location.href = "shopmunim://verify-customer/{customer_id}";
+            // Attempt to open the app via deep link.
+            window.location.href = "shopmunim://verify-customer/{{CUSTOMER_ID}}";
             
-            function showComingSoon(platform) {{
+            function showComingSoon(platform) {
                 alert(platform + " App is coming very soon!");
-            }}
+            }
 
-            async function verifyInBrowser() {{
-                try {{
-                    const response = await fetch('/api/public/verify-customer/{customer_id}', {{
+            async function verifyInBrowser() {
+                const btn = document.querySelector('.verify-btn');
+                btn.disabled = true;
+                btn.innerText = 'Verifying...';
+                
+                try {
+                    const response = await fetch('/api/public/verify-customer/{{CUSTOMER_ID}}', {
                         method: 'POST'
-                    }});
+                    });
                     const data = await response.json();
                     
-                    if (data.success || data.message === "Already verified") {{
+                    if (data.success || data.message === "Already verified") {
                         document.getElementById('neutral-icon').style.display = 'none';
                         document.getElementById('success-icon').style.display = 'flex';
                         document.getElementById('header-title').innerText = 'Verification Successful!';
                         document.getElementById('desc-text').innerText = 'Your account has been successfully verified via browser.';
                         document.getElementById('action-buttons').style.display = 'none';
-                    }} else {{
+                    } else {
                         alert("Verification failed. Please try again.");
-                    }}
-                }} catch (error) {{
+                        btn.disabled = false;
+                        btn.innerText = 'Verify in Browser';
+                    }
+                } catch (error) {
                     alert("Verification failed. Please try again.");
-                }}
-            }}
+                    btn.disabled = false;
+                    btn.innerText = 'Verify in Browser';
+                }
+            }
         </script>
     </head>
     <body>
@@ -1424,12 +1436,12 @@ async def view_verify_customer(customer_id: str):
             
             <div class="shop-box">
                 <span class="shop-label">Verify For</span>
-                <span class="shop-name">Shop {shop_name}</span>
+                <span class="shop-name">Shop {{SHOP_NAME}}</span>
             </div>
             
             <div id="action-buttons">
                 <p style="font-size: 14px; margin-bottom: 10px; margin-top: 0">Got the App?</p>
-                <a href="shopmunim://verify-customer/{customer_id}" class="app-btn">Open ShopMunim App</a>
+                <a href="shopmunim://verify-customer/{{CUSTOMER_ID}}" class="app-btn">Open ShopMunim App</a>
                 
                 <p style="font-size: 14px; margin-bottom: 10px; margin-top: 20px;">Or verify immediately:</p>
                 <button onclick="verifyInBrowser()" class="verify-btn">Verify in Browser</button>
@@ -1450,6 +1462,7 @@ async def view_verify_customer(customer_id: str):
     </body>
     </html>
     """
+    html_content = html_template.replace("{{CUSTOMER_ID}}", customer_id).replace("{{SHOP_NAME}}", shop_name)
     return HTMLResponse(content=html_content)
 
 @api_router.post("/public/verify-customer/{customer_id}")
