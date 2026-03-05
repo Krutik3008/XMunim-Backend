@@ -1397,8 +1397,9 @@ async def view_verify_customer(customer_id: str):
                 // Attempt to open the app via deep link after UI is visible.
                 function openApp() {
                     var deepLink = "shopmunim://verify-customer/{{CUSTOMER_ID}}";
-                    // Use intent:// for Chrome on Android
-                    var intentUrl = "intent://verify-customer/{{CUSTOMER_ID}}#Intent;scheme=shopmunim;package=com.krutik3011.ShopMunimApp;end";
+                    // Use intent:// for Chrome on Android, with fallback to stay on this page if app not installed
+                    var fallbackUrl = encodeURIComponent(window.location.href);
+                    var intentUrl = "intent://verify-customer/{{CUSTOMER_ID}}#Intent;scheme=shopmunim;package=com.krutik3011.ShopMunimApp;S.browser_fallback_url=" + fallbackUrl + ";end";
                     
                     var ua = navigator.userAgent.toLowerCase();
                     if (ua.indexOf('chrome') > -1 && ua.indexOf('android') > -1) {
