@@ -1455,22 +1455,6 @@ async def view_verify_customer(customer_id: str):
                 }
             </style>
             <script>
-                var autoOpenTimer = null;
-
-                // Attempt to open the app via deep link after UI is visible.
-                function openApp() {
-                    var deepLink = "shopmunim://verify-customer/{{CUSTOMER_ID}}";
-                    var fallbackUrl = encodeURIComponent(window.location.href);
-                    var intentUrl = "intent://verify-customer/{{CUSTOMER_ID}}#Intent;scheme=shopmunim;package=com.krutik3011.ShopMunimApp;S.browser_fallback_url=" + fallbackUrl + ";end";
-                    
-                    var ua = navigator.userAgent.toLowerCase();
-                    if (ua.indexOf('chrome') > -1 && ua.indexOf('android') > -1) {
-                        window.location.href = intentUrl;
-                    } else {
-                        window.location.href = deepLink;
-                    }
-                }
-                autoOpenTimer = setTimeout(openApp, 1500);
                 
                 function showModal(msg) {
                     document.getElementById('modal-message').innerText = msg;
@@ -1486,9 +1470,6 @@ async def view_verify_customer(customer_id: str):
                 }
 
                 async function verifyInBrowser() {
-                    // Cancel auto-redirect
-                    if (autoOpenTimer) { clearTimeout(autoOpenTimer); autoOpenTimer = null; }
-                    
                     var btn = document.querySelector('.btn-success');
                     btn.disabled = true;
                     btn.innerText = 'Verifying...';
@@ -1505,8 +1486,6 @@ async def view_verify_customer(customer_id: str):
                             document.getElementById('header-title').innerText = 'Verification Successful!';
                             document.getElementById('desc-text').innerText = 'Your Customer account has been successfully verified.';
                             document.getElementById('action-buttons').style.display = 'none';
-                            document.getElementById('shop-box').classList.add('verified');
-                            document.getElementById('verified-badge').classList.add('show');
                         } else {
                             showModal("Verification failed. Please try again.");
                             btn.disabled = false;
@@ -1522,7 +1501,7 @@ async def view_verify_customer(customer_id: str):
         </head>
         <body>
             <!-- Custom Modal (replaces alert) -->
-            <div id="custom-modal" class="modal-overlay" onclick="closeModal()">
+            <div id="custom-modal" class="modal-overlay">
                 <div class="modal-box" onclick="event.stopPropagation()">
                     <div class="modal-title">ShopMunim App</div>
                     <div id="modal-message" class="modal-msg"></div>
@@ -1537,10 +1516,7 @@ async def view_verify_customer(customer_id: str):
                 
                 <div id="shop-box" class="shop-box">
                     <span class="shop-label">Verify For</span>
-                    <span class="shop-name">{{SHOP_NAME}}</span>
-                    <div id="verified-badge" class="verified-badge">
-                        <span class="badge-icon">✓</span> Verified
-                    </div>
+                    <span class="shop-name">Shop {{SHOP_NAME}}</span>
                 </div>
                 
                 <div id="action-buttons">                    
