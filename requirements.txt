@@ -11,3 +11,4 @@ gunicorn==21.2.0
 firebase-admin>=6.5.0
 pytz==2025.2
 reportlab==4.4.10
+requests==2.31.0

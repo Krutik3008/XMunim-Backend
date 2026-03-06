@@ -19,6 +19,22 @@ A robust, asynchronous API server for ShopMunimApp built with **FastAPI** and **
 
 ---
 
+## 🏗️ Project Structure
+
+```text
+Shopmunim-Backend/
+├── server.py              # Main application entry point & API Router
+├── requirements.txt       # Python backend dependencies
+├── package.json           # Node.js dependencies (Axios for legacy/scripting)
+├── .gitignore             # Git exclusion rules (Python/Node/OS)
+├── .env                   # Environment config (Private)
+├── static/                # Publicly accessible assets (Uploaded photos)
+│   └── profile_photos/    # User-uploaded profile images
+├── venv/                  # Python virtual environment (Local)
+```
+
+---
+
 ## 📦 Prerequisites
 
 - **Python** (v3.9+) - [Download](https://python.org/)

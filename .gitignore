@@ -1,43 +1,92 @@
-# Python
+# === Python ===
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Virtual Environment
+# Virtual Environments
 venv/
 env/
 ENV/
 .venv/
+bin/
+Include/
+Lib/
+Scripts/
+pyvenv.cfg
 
-# Environment Variables
+# === Node.js ===
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+package-lock.json
+yarn.lock
+
+# === Environment & Secrets ===
 .env
+.env.backend
 .env.local
-.env.production
+.env.dev
+.env.test
+.env.prod
+*.env.*
+firebase-service-account.json
 
-# IDE
+# === IDEs ===
 .vscode/
 .idea/
+*.swp
+*.swo
 *.sublime-project
 *.sublime-workspace
+.project
+.pydevproject
+.settings/
 
-# Logs
-*.log
-logs/
-
-# OS Files
+# === OS Files ===
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 Desktop.ini
 
-# Expo (if any)
+# === Logs & Databases ===
+*.log
+logs/
+*.sqlite3
+*.db
+
+# === Misc ===
 .expo/
-
-# Misc
 *.bak
-*.swp
 *.tmp
-
-# Firebase
-firebase-service-account.json
-
+temp/
+tmp/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ipynb_checkpoints/

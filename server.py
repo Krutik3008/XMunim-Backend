@@ -25,6 +25,7 @@ import string
 import firebase_admin
 from firebase_admin import credentials, messaging
 import asyncio
+import requests
 
 # Configure logging right after imports
 logging.basicConfig(
@@ -383,10 +384,10 @@ def parse_from_mongo(item):
 
 @api_router.post("/auth/send-otp")
 async def send_otp(request: AuthRequest):
-    """Send OTP to phone number (mocked for MVP)"""
+    """Send OTP to phone number"""
+    user_exists = await db.users.find_one({"phone": request.phone})
+    
     if request.is_login:
-        # Search for user with same phone number
-        user_exists = await db.users.find_one({"phone": request.phone})
         if not user_exists:
             raise HTTPException(status_code=404, detail="User does not exist")
     else:
@@ -394,27 +395,117 @@ async def send_otp(request: AuthRequest):
         if not request.name:
             raise HTTPException(status_code=400, detail="Name is required for sign up")
             
-        user_exists = await db.users.find_one({"phone": request.phone})
         if user_exists:
             raise HTTPException(status_code=400, detail="Phone number already registered.")
 
+    msg91_auth_key = os.environ.get("MSG91_AUTH_KEY")
+    msg91_template_id = os.environ.get("MSG91_TEMPLATE_ID")
+    
+    # Check if MSG91 is fully configured and not pending
+    use_msg91 = msg91_auth_key and msg91_template_id and msg91_template_id.upper() != "PENDING"
+    
+    if use_msg91:
+        url = "https://control.msg91.com/api/v5/otp"
+        # Extract dial code assuming +91 or raw 10 digits
+        mobile = request.phone.replace("+", "").replace(" ", "")
+        if len(mobile) == 10:
+            mobile = f"91{mobile}"
+        
+        payload = {
+            "template_id": msg91_template_id,
+            "mobile": mobile,
+            "authkey": msg91_auth_key
+        }
+        try:
+            # Using JSON payload according to MSG91 docs for API v5
+            response = requests.post(url, json=payload, timeout=10)
+            response.raise_for_status()
+            logger.info(f"MSG91 Send OTP response: {response.text}")
+            
+            response_data = response.json()
+            if response_data.get("type") == "error":
+                error_msg = response_data.get("message", "Failed to send OTP")
+                logger.error(f"MSG91 send failed: {error_msg}")
+                # Fallback to mock if it's a template error or similar
+                if "template" in error_msg.lower() or "auth" in error_msg.lower():
+                    logger.warning("MSG91 returned error, falling back to mock OTP 123456")
+                else:
+                    logger.warning(f"MSG91 returned error: {error_msg}, falling back to mock OTP 123456")
+            else:
+                return {"message": "OTP sent successfully"}
+        except Exception as e:
+            logger.error(f"Failed to send OTP via MSG91: {str(e)}, falling back to mock OTP 123456")
+            # Don't raise here, fall through to mock strategy
+
+    # Mock strategy: Store 123456 in DB
+    logger.info(f"Using mock OTP 123456 for phone: {request.phone}")
     mock_otp = "123456"
     
-    await db.otps.delete_many({"phone": request.phone})
-    await db.otps.insert_one({
-        "phone": request.phone,
-        "otp": mock_otp,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
+    # Store OTP in database with expiration (10 minutes)
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=10)
+    await db.otps.update_one(
+        {"phone": request.phone},
+        {"$set": {"otp": mock_otp, "expires_at": expiry}},
+        upsert=True
+    )
     
-    return {"message": "OTP sent successfully", "mock_otp": mock_otp}
+    return {"message": "OTP sent successfully (Mock Mode: 123456)"}
 
 @api_router.post("/auth/verify-otp")
 async def verify_otp(request: OTPVerifyRequest):
     """Verify OTP and login user"""
-    otp_record = await db.otps.find_one({"phone": request.phone, "otp": request.otp})
-    if not otp_record:
-        raise HTTPException(status_code=400, detail="Invalid OTP")
+    msg91_auth_key = os.environ.get("MSG91_AUTH_KEY")
+    msg91_template_id = os.environ.get("MSG91_TEMPLATE_ID")
+    
+    # Flag to skip checking local DB if verified via MSG91
+    is_verified = False
+    
+    # Skip MSG91 verification if mock OTP is used (123456) or if template is PENDING
+    use_msg91_verify = (
+        msg91_auth_key and 
+        msg91_template_id and 
+        msg91_template_id.upper() != "PENDING" and
+        request.otp != "123456"
+    )
+    
+    if use_msg91_verify:
+        url = "https://control.msg91.com/api/v5/otp/verify"
+        mobile = request.phone.replace("+", "").replace(" ", "")
+        if len(mobile) == 10:
+            mobile = f"91{mobile}"
+        
+        params = {
+            "otp": request.otp,
+            "mobile": mobile
+        }
+        headers = {
+            "authkey": msg91_auth_key
+        }
+        
+        try:
+            response = requests.get(url, params=params, headers=headers)
+            response_data = response.json()
+            logger.info(f"MSG91 Verify OTP response: {response.text}")
+            
+            if response_data.get("type") == "success":
+                is_verified = True
+            else:
+                error_msg = response_data.get("message", "Invalid OTP")
+                logger.error(f"MSG91 verification failed: {error_msg}")
+                raise HTTPException(status_code=400, detail=error_msg)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to verify OTP via MSG91: {str(e)}")
+            # Don't raise here, allow fallback to local DB check for mock OTPs
+            logger.warning("Falling back to local DB check for OTP verification.")
+    
+    if not is_verified:
+        # Fallback to local db if MSG91 is not configured
+        otp_record = await db.otps.find_one({"phone": request.phone, "otp": request.otp})
+        if not otp_record:
+            raise HTTPException(status_code=400, detail="Invalid OTP")
+        await db.otps.delete_many({"phone": request.phone})
     
     # Search for user by phone number only
     user_data = await db.users.find_one({"phone": request.phone})
@@ -431,7 +522,6 @@ async def verify_otp(request: OTPVerifyRequest):
             user.verified = True
             await db.users.update_one({"id": user.id}, {"$set": {"verified": True}})
     
-    await db.otps.delete_many({"phone": request.phone})
     # Create a new session record
     new_session = UserSession(
         user_id=user.id,
@@ -2642,6 +2732,30 @@ async def shutdown_db_client():
 async def root():
     return {"status": "ok", "message": "ShopMunim App Backend is running"}
 
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+# ==================== Android App Links ====================
+
+@app.get("/.well-known/assetlinks.json")
+async def get_assetlinks():
+    """
+    Serve the Digital Asset Links file for Android App Links.
+    This allows the app to verify ownership of the domain and open links directly.
+    """
+    return [
+        {
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+                "namespace": "android_app",
+                "package_name": "com.krutik3011.ShopMunimApp",
+                "sha256_cert_fingerprints": [
+                    # IMPORTANT: This must be replaced with your production SHA-256 fingerprint
+                    "FA:C7:E1:F8:54:FB:C9:D1:09:16:3C:87:E8:E4:47:14:E8:67:E1:45:E6:34:45:F3:93:BB:85:FA:5F:12:B2:D5"
+                ]
+            }
+        }
+    ]
+
