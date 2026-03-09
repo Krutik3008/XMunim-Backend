@@ -426,30 +426,16 @@ async def send_otp(request: AuthRequest):
             if response_data.get("type") == "error":
                 error_msg = response_data.get("message", "Failed to send OTP")
                 logger.error(f"MSG91 send failed: {error_msg}")
-                # Fallback to mock if it's a template error or similar
-                if "template" in error_msg.lower() or "auth" in error_msg.lower():
-                    logger.warning("MSG91 returned error, falling back to mock OTP 123456")
-                else:
-                    logger.warning(f"MSG91 returned error: {error_msg}, falling back to mock OTP 123456")
+                raise HTTPException(status_code=400, detail=error_msg)
             else:
-                return {"message": "OTP sent successfully"}
+                # MSG91 returns a request id in the response 'message' field sometimes
+                session_id = response_data.get("message", "")
+                return {"message": "OTP sent successfully", "session": session_id}
         except Exception as e:
-            logger.error(f"Failed to send OTP via MSG91: {str(e)}, falling back to mock OTP 123456")
-            # Don't raise here, fall through to mock strategy
-
-    # Mock strategy: Store 123456 in DB
-    logger.info(f"Using mock OTP 123456 for phone: {request.phone}")
-    mock_otp = "123456"
-    
-    # Store OTP in database with expiration (10 minutes)
-    expiry = datetime.now(timezone.utc) + timedelta(minutes=10)
-    await db.otps.update_one(
-        {"phone": request.phone},
-        {"$set": {"otp": mock_otp, "expires_at": expiry}},
-        upsert=True
-    )
-    
-    return {"message": "OTP sent successfully (Mock Mode: 123456)"}
+            logger.error(f"Failed to send OTP via MSG91: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to send OTP via provider")
+    else:
+        raise HTTPException(status_code=500, detail="OTP Provider not configured properly")
 
 @api_router.post("/auth/verify-otp")
 async def verify_otp(request: OTPVerifyRequest):
@@ -460,12 +446,11 @@ async def verify_otp(request: OTPVerifyRequest):
     # Flag to skip checking local DB if verified via MSG91
     is_verified = False
     
-    # Skip MSG91 verification if mock OTP is used (123456) or if template is PENDING
+    # Enforce MSG91 verification
     use_msg91_verify = (
         msg91_auth_key and 
         msg91_template_id and 
-        msg91_template_id.upper() != "PENDING" and
-        request.otp != "123456"
+        msg91_template_id.upper() != "PENDING"
     )
     
     if use_msg91_verify:
@@ -484,34 +469,75 @@ async def verify_otp(request: OTPVerifyRequest):
         
         try:
             response = requests.get(url, params=params, headers=headers)
+            response.raise_for_status()
             response_data = response.json()
             logger.info(f"MSG91 Verify OTP response: {response.text}")
             
+            # API v5 returns type 'success' or 'error'
             if response_data.get("type") == "success":
                 is_verified = True
             else:
                 error_msg = response_data.get("message", "Invalid OTP")
                 logger.error(f"MSG91 verification failed: {error_msg}")
                 raise HTTPException(status_code=400, detail=error_msg)
+        except requests.exceptions.HTTPError as he:
+            try:
+                error_data = he.response.json()
+                error_msg = error_data.get("message", "Invalid OTP")
+            except:
+                error_msg = "Invalid OTP"
+            raise HTTPException(status_code=400, detail=error_msg)
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"Failed to verify OTP via MSG91: {str(e)}")
-            # Don't raise here, allow fallback to local DB check for mock OTPs
-            logger.warning("Falling back to local DB check for OTP verification.")
+            raise HTTPException(status_code=500, detail="Failed to verify OTP with provider")
+    else:
+        raise HTTPException(status_code=500, detail="OTP Provider not configured properly")
     
     if not is_verified:
-        # Fallback to local db if MSG91 is not configured
-        otp_record = await db.otps.find_one({"phone": request.phone, "otp": request.otp})
-        if not otp_record:
-            raise HTTPException(status_code=400, detail="Invalid OTP")
-        await db.otps.delete_many({"phone": request.phone})
+        raise HTTPException(status_code=400, detail="Invalid OTP")
     
     # Search for user by phone number only
     user_data = await db.users.find_one({"phone": request.phone})
     
     if not user_data:
         # Create new user, mark as verified since they used OTP
+        user = User(phone=request.phone, name=request.name or "User", verified=True, terms_accepted=request.terms_accepted)
+        user_dict = prepare_for_mongo(user.dict())
+        await db.users.insert_one(user_dict)
+    else:
+        user = User(**parse_from_mongo(user_data))
+        # If existing user is not verified, mark them as verified now
+        if not user.verified:
+            user.verified = True
+            await db.users.update_one({"id": user.id}, {"$set": {"verified": True}})
+    
+    # Create a new session record
+    new_session = UserSession(
+        user_id=user.id,
+        phone=user.phone,
+        device="Android App" if "android" in (request.name or "").lower() else "Mobile App",
+        os="Android" if "android" in (request.name or "").lower() else "iOS/Android"
+    )
+    await db.sessions.insert_one(prepare_for_mongo(new_session.dict()))
+    
+    token = create_token(user.id, new_session.id)
+    
+    return {
+        "token": token,
+        "user": user.dict(),
+        "message": "Login successful"
+    }
+
+@api_router.post("/auth/verify-sdk")
+async def verify_sdk(request: AuthRequest):
+    """Log in user after MSG91 React Native SDK verifies the OTP successfully"""
+    # Search for user by phone number only
+    user_data = await db.users.find_one({"phone": request.phone})
+    
+    if not user_data:
+        # Create new user, mark as verified since they used SDK OTP
         user = User(phone=request.phone, name=request.name or "User", verified=True, terms_accepted=request.terms_accepted)
         user_dict = prepare_for_mongo(user.dict())
         await db.users.insert_one(user_dict)
