@@ -385,18 +385,15 @@ def parse_from_mongo(item):
 @api_router.post("/auth/send-otp")
 async def send_otp(request: AuthRequest):
     """Send OTP to phone number"""
+    # Search for user by phone number (for logging or internal logic, but don't block)
     user_exists = await db.users.find_one({"phone": request.phone})
     
-    if request.is_login:
-        if not user_exists:
-            raise HTTPException(status_code=404, detail="User does not exist")
-    else:
-        # Check if user with same phone already exists
-        if not request.name:
-            raise HTTPException(status_code=400, detail="Name is required for sign up")
-            
-        if user_exists:
-            raise HTTPException(status_code=400, detail="Phone number already registered.")
+    # We no longer block sending OTP based on user existence. 
+    # Any number can receive an OTP, and the verification step will handle login vs signup.
+    if not request.is_login and not request.name and not user_exists:
+        # If it's a new user flow (SignUp), we still prefer a name if possible
+        # but we won't strictly block here as verification can handle it
+        pass
 
     msg91_auth_key = os.environ.get("MSG91_AUTH_KEY")
     msg91_template_id = os.environ.get("MSG91_TEMPLATE_ID")
@@ -436,6 +433,12 @@ async def send_otp(request: AuthRequest):
             raise HTTPException(status_code=500, detail="Failed to send OTP via provider")
     else:
         raise HTTPException(status_code=500, detail="OTP Provider not configured properly")
+
+@api_router.get("/auth/check-phone/{phone}")
+async def check_phone(phone: str):
+    """Check if a user exists with this phone number"""
+    user = await db.users.find_one({"phone": phone})
+    return {"exists": user is not None}
 
 @api_router.post("/auth/verify-otp")
 async def verify_otp(request: OTPVerifyRequest):
@@ -536,17 +539,23 @@ async def verify_sdk(request: AuthRequest):
     # Search for user by phone number only
     user_data = await db.users.find_one({"phone": request.phone})
     
-    if not user_data:
-        # Create new user, mark as verified since they used SDK OTP
-        user = User(phone=request.phone, name=request.name or "User", verified=True, terms_accepted=request.terms_accepted)
-        user_dict = prepare_for_mongo(user.dict())
-        await db.users.insert_one(user_dict)
-    else:
+    if request.is_login:
+        if not user_data:
+            raise HTTPException(status_code=404, detail="User does not exist. Please sign up.")
         user = User(**parse_from_mongo(user_data))
         # If existing user is not verified, mark them as verified now
         if not user.verified:
             user.verified = True
             await db.users.update_one({"id": user.id}, {"$set": {"verified": True}})
+    else:
+        # Sign Up case
+        if user_data:
+            raise HTTPException(status_code=400, detail="Phone number already registered. Please login.")
+        
+        # Create new user, mark as verified since they used SDK OTP
+        user = User(phone=request.phone, name=request.name or "User", verified=True, terms_accepted=request.terms_accepted)
+        user_dict = prepare_for_mongo(user.dict())
+        await db.users.insert_one(user_dict)
     
     # Create a new session record
     new_session = UserSession(
