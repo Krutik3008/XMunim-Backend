@@ -122,6 +122,7 @@ class Customer(BaseModel):
     name: str
     phone: str
     nickname: Optional[str] = None
+    type: str = "customer" # "customer", "staff", or "services"
     balance: float = 0.0  # negative means customer owes money
     is_auto_reminder_enabled: bool = False
     auto_reminder_delay: str = "3 days overdue"
@@ -129,6 +130,11 @@ class Customer(BaseModel):
     auto_reminder_method: str = "Push Notification"
     auto_reminder_message: Optional[str] = None
     is_verified: bool = False
+    
+    # Staff/Services specific fields
+    service_rate: Optional[float] = None
+    service_rate_type: Optional[str] = None # 'daily', 'hourly', 'monthly'
+    service_log: Optional[Dict[str, str]] = None # {"2026-03-12": "present", "2026-03-13": "absent"}
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Product(BaseModel):
@@ -233,11 +239,17 @@ class CustomerCreateRequest(BaseModel):
     name: str
     phone: str
     nickname: Optional[str] = None
+    type: Optional[str] = "customer"
     is_auto_reminder_enabled: Optional[bool] = False
     auto_reminder_delay: Optional[str] = "3 days overdue"
     auto_reminder_frequency: Optional[str] = "Daily until paid"
     auto_reminder_method: Optional[str] = "Push Notification"
     auto_reminder_message: Optional[str] = None
+    
+    # Staff/Services specific fields
+    service_rate: Optional[float] = None
+    service_rate_type: Optional[str] = None
+    service_log: Optional[Dict[str, str]] = None
 
 class ProductCreateRequest(BaseModel):
     name: str
@@ -263,10 +275,16 @@ class CustomerUpdateRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     nickname: Optional[str] = None
+    type: Optional[str] = None
     is_auto_reminder_enabled: Optional[bool] = None
     auto_reminder_delay: Optional[str] = None
     auto_reminder_frequency: Optional[str] = None
     auto_reminder_method: Optional[str] = None
+    
+    # Staff/Services specific fields
+    service_rate: Optional[float] = None
+    service_rate_type: Optional[str] = None
+    service_log: Optional[Dict[str, str]] = None
     auto_reminder_message: Optional[str] = None
 
 class UserVerifyRequest(BaseModel):
@@ -1196,18 +1214,19 @@ async def add_customer(shop_id: str, request: CustomerCreateRequest, current_use
     """Add a customer to a shop"""
     shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
     if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+        raise HTTPException(status_code=404, detail="Business not found")
     
-    # Check if the customer already exists in this specific shop
-    existing_customer = await db.customers.find_one({"shop_id": shop_id, "phone": request.phone})
+    # Check if the customer already exists in this specific shop with the same type
+    existing_customer = await db.customers.find_one({"shop_id": shop_id, "phone": request.phone, "type": request.type or "customer"})
     if existing_customer:
-        raise HTTPException(status_code=400, detail="Customer already exists")
+        raise HTTPException(status_code=400, detail="User with this phone number already exists in this type")
     
     customer = Customer(
         shop_id=shop_id,
         name=request.name,
         phone=request.phone,
         nickname=request.nickname,
+        type=request.type if hasattr(request, "type") and request.type else "customer",
         is_verified=False
     )
     
@@ -1232,15 +1251,18 @@ async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdat
         update_data["name"] = request.name
     if request.phone is not None:
         if customer.get("phone") != request.phone:
-            # Check if the new phone number already exists in this shop
-            existing_customer = await db.customers.find_one({"shop_id": shop_id, "phone": request.phone})
+            # Check if the new phone number already exists in this shop for the same type
+            target_type = request.type if hasattr(request, "type") and request.type else customer.get("type", "customer")
+            existing_customer = await db.customers.find_one({"shop_id": shop_id, "phone": request.phone, "type": target_type})
             if existing_customer:
-                raise HTTPException(status_code=400, detail="Phone number already exists")
+                raise HTTPException(status_code=400, detail="Phone number already exists for this category")
             
             update_data["phone"] = request.phone
             update_data["is_verified"] = False
     if request.nickname is not None:
         update_data["nickname"] = request.nickname
+    if hasattr(request, "type") and request.type is not None:
+        update_data["type"] = request.type
     if request.is_auto_reminder_enabled is not None:
         update_data["is_auto_reminder_enabled"] = request.is_auto_reminder_enabled
     if request.auto_reminder_delay is not None:
@@ -1249,6 +1271,13 @@ async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdat
         update_data["auto_reminder_frequency"] = request.auto_reminder_frequency
     if request.auto_reminder_method is not None:
         update_data["auto_reminder_method"] = request.auto_reminder_method
+        
+    if hasattr(request, "service_rate") and request.service_rate is not None:
+        update_data["service_rate"] = request.service_rate
+    if hasattr(request, "service_rate_type") and request.service_rate_type is not None:
+        update_data["service_rate_type"] = request.service_rate_type
+    if hasattr(request, "service_log") and request.service_log is not None:
+        update_data["service_log"] = request.service_log
 
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
@@ -1259,6 +1288,55 @@ async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdat
     )
 
     updated_customer = await db.customers.find_one({"id": customer_id})
+    return Customer(**parse_from_mongo(updated_customer))
+
+@api_router.put("/shops/{shop_id}/customers/{customer_id}/service_data", response_model=Customer)
+async def update_service_data(
+    shop_id: str, 
+    customer_id: str, 
+    request: dict = Body(...),
+    current_user: User = Depends(get_current_user)
+):
+    """Specific endpoint to update service rate and calendar logs for Staff/Services.
+    Accepts keys: service_rate, service_rate_type, service_log OR date & status to update a single record.
+    """
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
+    if not customer:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    if customer.get("type", "customer") not in ["services", "staff"]:
+        raise HTTPException(status_code=400, detail="User is not a service or staff member")
+
+    update_data = {}
+    
+    # Optional fields to update
+    if "service_rate" in request:
+        update_data["service_rate"] = request["service_rate"]
+    if "service_rate_type" in request:
+        update_data["service_rate_type"] = request["service_rate_type"]
+        
+    # Handle individual log updates or full replacements
+    if "service_log" in request:
+        update_data["service_log"] = request["service_log"]
+    elif "date" in request and "status" in request:
+        # Update just one specific date in the log
+        current_log = customer.get("service_log", {}) or {}
+        current_log[request["date"]] = request["status"]
+        update_data["service_log"] = current_log
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid update data provided")
+
+    await db.customers.update_one(
+        {"id": customer_id, "shop_id": shop_id},
+        {"$set": update_data}
+    )
+
+    updated_customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
     return Customer(**parse_from_mongo(updated_customer))
 
 @api_router.post("/shops/{shop_id}/customers/{customer_id}/notify-payment")
@@ -2557,6 +2635,60 @@ async def get_customer_notifications(current_user: User = Depends(get_current_us
         enriched_notifications.append(noti_data)
 
     return enriched_notifications
+
+# ==================== EXTERNAL PROXY PINCODE====================
+
+@api_router.get("/location/pincode/{pincode}")
+async def get_pincode_details(pincode: str):
+    """
+    Proxy endpoint to fetch location details for a pincode from postalpincode.in.
+    This bypasses any client-side interceptors (e.g. MSG91 widget) that block standard frontend fetch calls.
+    """
+    if len(pincode) != 6 or not pincode.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid pincode format")
+        
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Accept": "application/json"
+    }
+    
+    try:
+        # Try primary API first (often blocks/fails)
+        url = f"https://api.postalpincode.in/pincode/{pincode}"
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
+        return response.json()
+    except Exception as primary_error:
+        logger.warning(f"Primary Pincode API failed for {pincode}: {primary_error}. Trying reliable global API...")
+        
+        try:
+            # Most reliable fallback (Zippopotam.us - India)
+            fallback_url = f"http://api.zippopotam.us/in/{pincode}"
+            fallback_response = requests.get(fallback_url, headers=headers, timeout=10)
+            fallback_response.raise_for_status()
+            
+            data = fallback_response.json()
+            
+            # Translate Zippopotam format to match Postalpincode.in format so frontend needs no changes
+            formatted_data = [{
+                "Message": "Number of pincode(s) found",
+                "Status": "Success",
+                "PostOffice": []
+            }]
+            
+            for place in data.get("places", []):
+                formatted_data[0]["PostOffice"].append({
+                    "Name": place.get("place name", ""),
+                    "District": place.get("state abbreviation", data.get("country", "")), # Zippopotam lacks district often
+                    "State": place.get("state", ""),
+                    "Country": data.get("country", "India"),
+                    "Pincode": pincode
+                })
+            
+            return formatted_data
+        except Exception as fallback_error:
+            logger.error(f"All Pincode APIs failed for {pincode}: {fallback_error}")
+            raise HTTPException(status_code=503, detail="Location service temporarily unavailable")
 
 # ==================== App Configuration ====================
 
