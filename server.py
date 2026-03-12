@@ -134,7 +134,7 @@ class Customer(BaseModel):
     # Staff/Services specific fields
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None # 'daily', 'hourly', 'monthly'
-    service_log: Optional[Dict[str, str]] = None # {"2026-03-12": "present", "2026-03-13": "absent"}
+    service_log: Optional[Dict[str, Optional[str]]] = None # {"2026-03-12": "present", "2026-03-13": "absent"}
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Product(BaseModel):
@@ -249,7 +249,7 @@ class CustomerCreateRequest(BaseModel):
     # Staff/Services specific fields
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None
-    service_log: Optional[Dict[str, str]] = None
+    service_log: Optional[Dict[str, Optional[str]]] = None
 
 class ProductCreateRequest(BaseModel):
     name: str
@@ -284,7 +284,7 @@ class CustomerUpdateRequest(BaseModel):
     # Staff/Services specific fields
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None
-    service_log: Optional[Dict[str, str]] = None
+    service_log: Optional[Dict[str, Optional[str]]] = None
     auto_reminder_message: Optional[str] = None
 
 class UserVerifyRequest(BaseModel):
@@ -1106,67 +1106,72 @@ async def get_shop_customers(shop_id: str, current_user: User = Depends(get_curr
         raise HTTPException(status_code=404, detail="Shop not found")
     
     customers = await db.customers.find({"shop_id": shop_id}).to_list(length=None)
-    print(f"[DEBUG] Shop: {shop_id}, Found {len(customers)} customers")
     
     # All-time stats for the summary cards
     total_customers_count = len(customers)
     all_time_with_dues_count = 0
     all_time_total_dues = 0
     for c in customers:
-        bal = c.get("balance", 0)
+        bal = c.get("balance", 0) or 0
         if bal < 0:
             all_time_with_dues_count += 1
             all_time_total_dues += abs(bal)
     
-    print(f"[DEBUG] All-time Dues: {all_time_with_dues_count} customers, Total ₹{all_time_total_dues}")
-
     # Date Filter setup
     tx_query = {"shop_id": shop_id}
     date_filter = None
     if from_date or to_date:
         date_filter = {}
-        if from_date:
-            date_filter["$gte"] = from_date
-        if to_date:
-            # If to_date is already an ISO string (contains 'T'), use it as is
-            # Otherwise, append T23:59:59.999 for YYYY-MM-DD format
-            if 'T' in to_date:
-                date_filter["$lte"] = to_date
-            else:
-                date_filter["$lte"] = to_date + "T23:59:59.999"
-        tx_query["date"] = date_filter
+        try:
+            if from_date:
+                # Convert string to datetime for BSON query
+                d_from = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
+                date_filter["$gte"] = d_from
+            if to_date:
+                # Convert string to datetime for BSON query
+                d_to_str = to_date if 'T' in to_date else to_date + "T23:59:59.999Z"
+                d_to = datetime.fromisoformat(d_to_str.replace('Z', '+00:00'))
+                date_filter["$lte"] = d_to
+            tx_query["date"] = date_filter
+        except Exception as e:
+            logger.error(f"Date parsing error in get_shop_customers: {e}")
     
-    # Period-specific stats
-    all_transactions = await db.transactions.find(tx_query).to_list(length=None)
-    print(f"[DEBUG] tx_query: {tx_query}, Found {len(all_transactions)} transactions")
+    # Period-specific stats - Fetch ALL relevant transactions once
+    all_transactions = await db.transactions.find(tx_query).sort("date", -1).to_list(length=None)
     
-    # Use float() to ensure numerical sums even if stored as strings (though they should be floats)
     def safe_amt(tx):
         try:
             return float(tx.get("amount", 0))
         except (TypeError, ValueError):
             return 0.0
 
-    period_amount = sum(safe_amt(tx) for tx in all_transactions)
-    # Handle "credit"/sales
-    period_sales = sum(safe_amt(tx) for tx in all_transactions if str(tx.get("type", "")).lower() == "credit")
-    # Handle "payment"/"debit"
-    period_payments = sum(safe_amt(tx) for tx in all_transactions if str(tx.get("type", "")).lower() in ["payment", "debit"])
+    period_sales = 0.0
+    period_payments = 0.0
     
-    # Identify active customers and calculate period deltas per customer
+    # Dictionaries to avoid N+1 queries
     customer_period_deltas = {}
     active_customer_ids = set()
+    customer_transactions_map = {} # cid -> list of transactions
+    
     for tx in all_transactions:
         cid = str(tx.get("customer_id", ""))
-        if cid:
-            active_customer_ids.add(cid)
-            amt = safe_amt(tx)
-            tx_type = str(tx.get("type", "")).lower()
-            
-            if tx_type == "credit":
-                customer_period_deltas[cid] = customer_period_deltas.get(cid, 0) - amt
-            elif tx_type in ["payment", "debit"]:
-                customer_period_deltas[cid] = customer_period_deltas.get(cid, 0) + amt
+        if not cid: continue
+        
+        active_customer_ids.add(cid)
+        amt = safe_amt(tx)
+        tx_type = str(tx.get("type", "")).lower()
+        
+        # Track transactions per customer
+        if cid not in customer_transactions_map:
+            customer_transactions_map[cid] = []
+        customer_transactions_map[cid].append(tx)
+        
+        if tx_type == "credit":
+            period_sales += amt
+            customer_period_deltas[cid] = customer_period_deltas.get(cid, 0) - amt
+        elif tx_type in ["payment", "debit"]:
+            period_payments += amt
+            customer_period_deltas[cid] = customer_period_deltas.get(cid, 0) + amt
 
     # Enrichment loop for list cards
     customers_with_details = []
@@ -1176,21 +1181,21 @@ async def get_shop_customers(shop_id: str, current_user: User = Depends(get_curr
         if (from_date or to_date) and c_id not in active_customer_ids:
             continue
 
-        customer_data = Customer(**parse_from_mongo(customer)).dict()
-        
-        # Add period specific delta
-        customer_data["period_delta"] = customer_period_deltas.get(c_id, 0)
-        
-        # Enrich with transaction stats (RESPECT DATE FILTER ON THE CARD TOO)
-        tx_query_card = {"customer_id": c_id, "shop_id": shop_id}
-        if date_filter:
-            tx_query_card["date"] = date_filter
+        try:
+            customer_data = Customer(**parse_from_mongo(customer)).dict()
             
-        txs_card = await db.transactions.find(tx_query_card).sort("date", -1).to_list(length=None)
-        customer_data["total_transactions"] = len(txs_card)
-        customer_data["last_transaction_date"] = txs_card[0]["date"] if txs_card else None
-        
-        customers_with_details.append(customer_data)
+            # Add period specific delta
+            customer_data["period_delta"] = customer_period_deltas.get(c_id, 0)
+            
+            # Use pre-fetched transactions to avoid N+1 queries
+            txs_card = customer_transactions_map.get(c_id, [])
+            customer_data["total_transactions"] = len(txs_card)
+            customer_data["last_transaction_date"] = txs_card[0]["date"] if txs_card else None
+            
+            customers_with_details.append(customer_data)
+        except Exception as e:
+            logger.error(f"Skipping corrupted customer {c_id}: {e}")
+            continue
     
     return {
         "customers": customers_with_details,
@@ -1202,7 +1207,7 @@ async def get_shop_customers(shop_id: str, current_user: User = Depends(get_curr
         "period_transactions": len(all_transactions),
         "period_active_customers": len(active_customer_ids),
         # Backward compatibility fields
-        "total_amount": period_amount,
+        "total_amount": period_sales + period_payments,
         "total_sales": period_sales,
         "total_dues": all_time_total_dues,
         "with_dues": all_time_with_dues_count,
