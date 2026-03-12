@@ -40,10 +40,10 @@ load_dotenv(ROOT_DIR / '.env')
 # MongoDB connection
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ.get('DB_NAME', 'shopmunim_app')]
+db = client[os.environ.get('DB_NAME', 'xmunim_app')]
 
 # Create the main app without a prefix
-app = FastAPI(title="ShopMunim App Backend", version="1.0.0")
+app = FastAPI(title="XMunim App Backend", version="1.0.0")
 
 # Mount static files for public assets
 if not (ROOT_DIR / "static").exists():
@@ -54,7 +54,7 @@ app.mount("/static", StaticFiles(directory=str(ROOT_DIR / "static")), name="stat
 api_router = APIRouter(prefix="/api")
 
 # JWT Configuration
-JWT_SECRET = "shopmunim_secret_key_2024"
+JWT_SECRET = "xmunim_secret_key_2024"
 security = HTTPBearer()
 
 # Firebase Admin Configuration
@@ -794,7 +794,7 @@ async def request_data_export(current_user: User = Depends(get_current_user)):
     styles = getSampleStyleSheet()
     Story = []
     
-    Story.append(Paragraph("ShopMunim - Data Export Report", styles['Title']))
+    Story.append(Paragraph("XMunim - Data Export Report", styles['Title']))
     Story.append(Spacer(1, 12))
     
     Story.append(Paragraph(f"Generated on: {export_data['export_date']}", styles['Normal']))
@@ -1429,7 +1429,7 @@ async def send_verification_link(shop_id: str, customer_id: str, current_user: U
     # In a real app, this would be a deep link to the app or a hosted page
     # For MVP, we'll return a link to our public verification endpoint
     # We use a hardcoded base URL for now as per implementation plan
-    verification_link = f"https://shopmunim-backend.onrender.com/api/public/verify-customer/{customer_id}"
+    verification_link = f"https://xmunim-backend.onrender.com/api/public/verify-customer/{customer_id}"
     
     return {
         "success": True, 
@@ -1460,7 +1460,7 @@ async def view_verify_customer(customer_id: str):
             )
         
         shop = await db.shops.find_one({"id": customer.get("shop_id")})
-        shop_name = shop.get("name", "ShopMunim") if shop else "ShopMunim"
+        shop_name = shop.get("name", "XMunim") if shop else "XMunim"
         logger.info(f"Found customer {customer.get('name')} for shop {shop_name}")
         
         html_template = """
@@ -1469,7 +1469,7 @@ async def view_verify_customer(customer_id: str):
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Account Verification - ShopMunim</title>
+            <title>Account Verification - XMunim</title>
             <style>
                 * { box-sizing: border-box; margin: 0; padding: 0; }
                 body {
@@ -1712,7 +1712,7 @@ async def view_verify_customer(customer_id: str):
             <!-- Custom Modal (replaces alert) -->
             <div id="custom-modal" class="modal-overlay">
                 <div class="modal-box" onclick="event.stopPropagation()">
-                    <div class="modal-title">ShopMunim App</div>
+                    <div class="modal-title">XMunim App</div>
                     <div id="modal-message" class="modal-msg"></div>
                     <button class="modal-ok-btn" onclick="closeModal()">OK</button>
                 </div>
@@ -1742,7 +1742,7 @@ async def view_verify_customer(customer_id: str):
                 </div>
                 
                 <div class="footer">
-                    Powered by <strong>ShopMunim</strong>
+                    Powered by <strong>XMunim</strong>
                 </div>
             </div>
         </body>
@@ -1762,7 +1762,7 @@ async def do_verify_customer(customer_id: str):
         raise HTTPException(status_code=404, detail="Customer not found")
     
     shop = await db.shops.find_one({"id": customer.get("shop_id")})
-    shop_name = shop.get("name", "ShopMunim") if shop else "ShopMunim"
+    shop_name = shop.get("name", "XMunim") if shop else "XMunim"
     
     if customer.get("is_verified", False):
         return {"success": True, "message": "Already verified", "shop_name": shop_name}
@@ -2055,7 +2055,7 @@ async def view_connect_page(shop_code: str):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Connect to Shop SHOP_NAME - ShopMunim</title>
+        <title>Connect to Shop SHOP_NAME - XMunim</title>
         <style>
             * { box-sizing: border-box; margin: 0; padding: 0; }
             body {
@@ -2247,12 +2247,12 @@ async def view_connect_page(shop_code: str):
             <!-- Initial Form State -->
             <div id="formState">
                 <div class="icon-circle icon-shop">
-                    <img src="/static/icon-v3.png" alt="ShopMunim" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                    <img src="/static/icon-v3.png" alt="XMunim" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
                     <span class="icon-emoji" style="display:none;">🏪</span>
                 </div>
                 <h1>Shop SHOP_NAME</h1>
                 CATEGORY_BADGE
-                <p class="desc">Join this shop on ShopMunim to view items, make requests, and track payments.</p>
+                <p class="desc">Join this shop on XMunim to view items, make requests, and track payments.</p>
                 
                 <form id="connectForm" onsubmit="handleConnect(event)" novalidate>
                     <div class="form-group">
@@ -2281,7 +2281,7 @@ async def view_connect_page(shop_code: str):
                     <p>You are now connected to <strong>Shop SHOP_NAME</strong> as a verified customer.</p>
                     <p style="margin-top:8px;">The shop owner can now see you in their customer list.</p>
                 </div>
-                <p class="branding">Powered by <strong>ShopMunim</strong></p>
+                <p class="branding">Powered by <strong>XMunim</strong></p>
             </div>
 
             <!-- Error State -->
@@ -2294,7 +2294,7 @@ async def view_connect_page(shop_code: str):
                     <p id="errorMessage">This phone number is already connected as a customer.</p>
                 </div>
                 <button class="btn btn-primary" style="margin-top:16px;" onclick="resetForm()">Try Another Number</button>
-                <p class="branding">Powered by <strong>ShopMunim</strong></p>
+                <p class="branding">Powered by <strong>XMunim</strong></p>
             </div>
         </div>
 
@@ -2897,7 +2897,7 @@ async def shutdown_db_client():
 # Health check endpoint
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "ShopMunim App Backend is running"}
+    return {"status": "ok", "message": "XMunim App Backend is running"}
 
 
 @app.get("/health")
@@ -2917,7 +2917,7 @@ async def get_assetlinks():
             "relation": ["delegate_permission/common.handle_all_urls"],
             "target": {
                 "namespace": "android_app",
-                "package_name": "com.krutik3011.ShopMunimApp",
+                "package_name": "com.krutik3011.xmunimapp",
                 "sha256_cert_fingerprints": [
                     # IMPORTANT: This must be replaced with your production SHA-256 fingerprint
                     "FA:C7:E1:F8:54:FB:C9:D1:09:16:3C:87:E8:E4:47:14:E8:67:E1:45:E6:34:45:F3:93:BB:85:FA:5F:12:B2:D5"

@@ -1,6 +1,6 @@
-# 🏪 ShopMunim Backend
+# 🏪 XMunim Backend
 
-A robust, asynchronous API server for ShopMunimApp built with **FastAPI** and **MongoDB**. This backend serves the Frontend for Customers, Shop Owners, and Admins.
+A robust, asynchronous API server for XMunimApp built with **FastAPI** and **MongoDB**. This backend serves the Frontend for Customers, Shop Owners, and Admins.
 
 ---
 
@@ -22,7 +22,7 @@ A robust, asynchronous API server for ShopMunimApp built with **FastAPI** and **
 ## 🏗️ Project Structure
 
 ```text
-Shopmunim-Backend/
+XMunim-Backend/
 ├── server.py              # Main application entry point & API Router
 ├── requirements.txt       # Python backend dependencies
 ├── package.json           # Node.js dependencies (Axios for legacy/scripting)
@@ -47,7 +47,7 @@ Shopmunim-Backend/
 
 ```bash
 # Clone the repository
-cd Shopmunim-Backend
+cd XMunim-Backend
 
 # Create virtual environment
 python -m venv venv
@@ -73,7 +73,7 @@ Create a `.env` file in the root directory:
 
 ```env
 MONGO_URL=mongodb://localhost:27017
-DB_NAME=shopmunim_app
+DB_NAME=xmunim_app
 MSG91_AUTH_KEY=your_auth_key
 MSG91_TEMPLATE_ID=your_template_id
 FIREBASE_SERVICE_ACCOUNT_JSON='{...}'
@@ -187,4 +187,4 @@ All API endpoints other than public ones require an `Authorization: Bearer <toke
 
 ## 👨‍💻 Author
 
-Developed with ❤️ for ShopMunim
+Developed with ❤️ for XMunim
