@@ -97,7 +97,7 @@ Swagger UI Documentation: `http://localhost:8000/docs`
 
 - **User**: Phone, name, active_role, admin_roles, verified status.
 - **Shop**: Name, category, location, shop_code, owner_id.
-- **Customer**: Links a user to a shop with a balance.
+- **Customer**: Links a user to a shop with a balance. Supports **Staff/Services** types with rate settings (daily/hourly/monthly) and attendance logs.
 - **Product**: Items sold by a shop (name, price, active status).
 - **Transaction**: Credit or Payment records with product list and notes.
 - **PaymentRequest**: Log of notifications and scheduled reminders.
@@ -120,6 +120,7 @@ All API endpoints other than public ones require an `Authorization: Bearer <toke
 ### 🔐 Authentication & Profile
 - `POST /api/auth/send-otp`: Request OTP for login/signup (`phone`, `name`, `is_login`).
 - `POST /api/auth/verify-otp`: Validate OTP and get JWT token (`phone`, `otp`).
+- `POST /api/auth/verify-sdk`: SDK-based verification for React Native (`phone`, `is_login`).
 - `GET /api/auth/me`: Get current user profile.
 - `PUT /api/auth/me`: Update profile fields (`name`, `fcm_token`, `push_enabled`, etc.).
 - `POST /api/auth/me/photo`: Upload base64 profile photo (`photo`).
@@ -142,6 +143,7 @@ All API endpoints other than public ones require an `Authorization: Bearer <toke
 - `GET /api/shops/{id}/customers`: List all shop customers with balances and filter by date.
 - `POST /api/shops/{id}/customers`: Add a new customer (`name`, `phone`).
 - `PUT /api/shops/{id}/customers/{customer_id}`: Update customer preferences.
+- `PUT /api/shops/{id}/customers/{customer_id}/service_data`: Update service-specific fields (rate, attendance logs).
 - `POST /api/shops/{id}/customers/{customer_id}/send-verification`: Generate verification deep link.
 
 ### 📦 Product Inventory
@@ -163,16 +165,22 @@ All API endpoints other than public ones require an `Authorization: Bearer <toke
 ### 🔑 Admin Panel
 - `GET /api/admin/dashboard`: Global metrics (total users, active shops, revenue).
 - `GET /api/admin/users`: Search and manage all app users.
+- `GET /api/admin/users-for-role-assignment`: Get users specifically for role management.
 - `PUT /api/admin/users/{id}`: Verify/unverify or flag users.
 - `GET /api/admin/shops`: Global shop list with owner details.
 - `GET /api/admin/transactions`: Global transaction history.
 - `POST /api/admin/assign-role`: Grant/revoke Admin or Super Admin roles.
+- `POST /api/admin/promote-to-super-admin/{id}`: Promote an admin to super admin status.
+
+### 📍 Location Services
+- `GET /api/location/pincode/{pincode}`: Proxy endpoint for robust pincode data retrieval.
 
 ### 🌍 Public Access (No Auth)
 - `GET /api/public/verify-customer/{id}`: HTML Verification Page for customers.
 - `POST /api/public/verify-customer/{id}`: Mark customer as verified via API.
 - `GET /api/shops/public/{shop_code}`: Get shop details by code.
 - `POST /api/shops/public/{shop_code}/connect`: Connect customer to shop via QR/Link.
+- `GET /api/public/connect/{shop_code}`: Public HTML page for shop connection.
 
 ---
 
