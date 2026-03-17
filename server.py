@@ -171,6 +171,7 @@ class Staff(BaseModel):
     service_rate_type: str = "daily" # 'daily', 'hourly', 'monthly'
     service_log: Optional[Dict[str, Any]] = None 
     balance: float = 0.0
+    upi_id: Optional[str] = None
     is_verified: bool = False
     type: str = "staff"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -305,6 +306,7 @@ class StaffCreateRequest(BaseModel):
     role: Optional[str] = None
     service_rate: float
     service_rate_type: str = "daily"
+    upi_id: Optional[str] = None
 
 class StaffUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -314,6 +316,7 @@ class StaffUpdateRequest(BaseModel):
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None
     service_log: Optional[Dict[str, Any]] = None
+    upi_id: Optional[str] = None
 
 class TransactionProductRequest(BaseModel):
     product_id: str
@@ -1705,6 +1708,7 @@ async def add_staff(shop_id: str, request: StaffCreateRequest, current_user: Use
         role=request.role,
         service_rate=request.service_rate,
         service_rate_type=request.service_rate_type,
+        upi_id=request.upi_id,
         is_verified=False
     )
     
