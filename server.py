@@ -1515,9 +1515,30 @@ async def update_service(shop_id: str, service_id: str, request: ServiceUpdateRe
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    update_data = request.dict(exclude_unset=True)
-    if not update_data:
+    # Get all fields explicitly provided in the request (including nulls)
+    request_data = request.dict(exclude_unset=True)
+    if not request_data:
         raise HTTPException(status_code=400, detail="No update data provided")
+
+    update_data = {}
+    for key, value in request_data.items():
+        if key == "phone":
+            if service.get("phone") != value:
+                # Check for duplicates in same shop and category
+                existing = await db.services.find_one({
+                    "shop_id": shop_id,
+                    "phone": value
+                })
+                if existing:
+                    raise HTTPException(status_code=400, detail="Phone number already exists for another service")
+                
+                update_data["phone"] = value
+                update_data["is_verified"] = False
+        else:
+            update_data[key] = value
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid update data provided")
 
     # Use the internal _id if the search was by _id
     target_filter = {"_id": service["_id"]} if "_id" in service else {"id": service_id, "shop_id": shop_id}
@@ -1755,9 +1776,30 @@ async def update_staff(shop_id: str, staff_id: str, request: StaffUpdateRequest,
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
 
-    update_data = request.dict(exclude_unset=True)
-    if not update_data:
+    # Get all fields explicitly provided in the request (including nulls)
+    request_data = request.dict(exclude_unset=True)
+    if not request_data:
         raise HTTPException(status_code=400, detail="No update data provided")
+
+    update_data = {}
+    for key, value in request_data.items():
+        if key == "phone":
+            if staff.get("phone") != value:
+                # Check for duplicates in same shop and category
+                existing = await db.staff.find_one({
+                    "shop_id": shop_id,
+                    "phone": value
+                })
+                if existing:
+                    raise HTTPException(status_code=400, detail="Phone number already exists for another staff member")
+                
+                update_data["phone"] = value
+                update_data["is_verified"] = False
+        else:
+            update_data[key] = value
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid update data provided")
 
     target_filter = {"_id": staff["_id"]} if "_id" in staff else {"id": staff_id, "shop_id": shop_id}
     await db.staff.update_one(target_filter, {"$set": update_data})
