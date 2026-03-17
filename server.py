@@ -9,7 +9,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import uuid
 import pytz
 from datetime import datetime, timezone, timedelta
@@ -27,7 +27,7 @@ from firebase_admin import credentials, messaging
 import asyncio
 import requests
 
-# Configure logging right after imports
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -134,7 +134,22 @@ class Customer(BaseModel):
     # Staff/Services specific fields
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None # 'daily', 'hourly', 'monthly'
-    service_log: Optional[Dict[str, Optional[str]]] = None # {"2026-03-12": "present", "2026-03-13": "absent"}
+    service_log: Optional[Dict[str, Any]] = None # {"2026-03-12": {"status": "present", "rate": 55}}
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class Service(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    shop_id: str
+    name: str
+    phone: str
+    nickname: Optional[str] = None
+    category: Optional[str] = None # e.g. "Milk Delivery", "Cleaner"
+    service_rate: float = 0.0
+    service_rate_type: str = "daily" # 'daily', 'hourly', 'monthly'
+    service_log: Optional[Dict[str, Any]] = None # {"2026-03-12": {"status": "present", "rate": 55}}
+    balance: float = 0.0
+    is_verified: bool = False
+    type: str = "services"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Product(BaseModel):
@@ -143,6 +158,21 @@ class Product(BaseModel):
     name: str
     price: float
     active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class Staff(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    shop_id: str
+    name: str
+    phone: str
+    nickname: Optional[str] = None
+    role: Optional[str] = None # e.g. "Chef", "Delivery Boy"
+    service_rate: float = 0.0
+    service_rate_type: str = "daily" # 'daily', 'hourly', 'monthly'
+    service_log: Optional[Dict[str, Any]] = None 
+    balance: float = 0.0
+    is_verified: bool = False
+    type: str = "staff"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class TransactionProduct(BaseModel):
@@ -249,7 +279,15 @@ class CustomerCreateRequest(BaseModel):
     # Staff/Services specific fields
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None
-    service_log: Optional[Dict[str, Optional[str]]] = None
+    service_log: Optional[Dict[str, Any]] = None
+
+class ServiceCreateRequest(BaseModel):
+    name: str
+    phone: str
+    nickname: Optional[str] = None
+    category: Optional[str] = None
+    service_rate: float
+    service_rate_type: str = "daily"
 
 class ProductCreateRequest(BaseModel):
     name: str
@@ -259,6 +297,23 @@ class ProductUpdateRequest(BaseModel):
     name: Optional[str] = None
     price: Optional[float] = None
     active: Optional[bool] = None
+
+class StaffCreateRequest(BaseModel):
+    name: str
+    phone: str
+    nickname: Optional[str] = None
+    role: Optional[str] = None
+    service_rate: float
+    service_rate_type: str = "daily"
+
+class StaffUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    nickname: Optional[str] = None
+    role: Optional[str] = None
+    service_rate: Optional[float] = None
+    service_rate_type: Optional[str] = None
+    service_log: Optional[Dict[str, Any]] = None
 
 class TransactionProductRequest(BaseModel):
     product_id: str
@@ -284,8 +339,17 @@ class CustomerUpdateRequest(BaseModel):
     # Staff/Services specific fields
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None
-    service_log: Optional[Dict[str, Optional[str]]] = None
+    service_log: Optional[Dict[str, Any]] = None
     auto_reminder_message: Optional[str] = None
+
+class ServiceUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    nickname: Optional[str] = None
+    category: Optional[str] = None
+    service_rate: Optional[float] = None
+    service_rate_type: Optional[str] = None
+    service_log: Optional[Dict[str, Any]] = None
 
 class UserVerifyRequest(BaseModel):
     verified: Optional[bool] = None
@@ -379,13 +443,18 @@ def prepare_for_mongo(data):
     return data
 
 def parse_from_mongo(item):
-    """Parse datetime strings or objects back from MongoDB and remove _id"""
+    """Parse datetime strings or objects back from MongoDB and handle ID mapping"""
     if item is None:
         return None
     if isinstance(item, dict):
         item = item.copy()  # Don't modify original
+        # Map MongoDB's internal _id to our standard 'id' field if 'id' is missing
         if '_id' in item:
+            if 'id' not in item:
+                item['id'] = str(item['_id'])
             item.pop('_id')
+        
+        # Parse common datetime fields
         for key, value in item.items():
             if isinstance(value, str) and key in ['created_at', 'date', 'scheduled_at']:
                 try:
@@ -1240,6 +1309,19 @@ async def add_customer(shop_id: str, request: CustomerCreateRequest, current_use
     await db.customers.insert_one(customer_dict)
     return customer
 
+@api_router.get("/shops/{shop_id}/customers/{customer_id}", response_model=Customer)
+async def get_customer(shop_id: str, customer_id: str, current_user: User = Depends(get_current_user)):
+    """Get a specific customer's details"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    return Customer(**parse_from_mongo(customer))
+
 @api_router.put("/shops/{shop_id}/customers/{customer_id}", response_model=Customer)
 async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdateRequest, current_user: User = Depends(get_current_user)):
     """Update customer details"""
@@ -1313,6 +1395,12 @@ async def update_service_data(
     if not customer:
         raise HTTPException(status_code=404, detail="User not found")
         
+    if not customer.get("is_verified", False):
+        raise HTTPException(
+            status_code=403, 
+            detail="Customer is not verified. Please send verification link and have customer verify before updating service data."
+        )
+
     if customer.get("type", "customer") not in ["services", "staff"]:
         raise HTTPException(status_code=400, detail="User is not a service or staff member")
 
@@ -1343,6 +1431,326 @@ async def update_service_data(
 
     updated_customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
     return Customer(**parse_from_mongo(updated_customer))
+
+# ==================== Service Routes ====================
+
+@api_router.get("/shops/{shop_id}/services")
+async def get_shop_services(shop_id: str, current_user: User = Depends(get_current_user)):
+    """Get all services for a specific shop"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    services = await db.services.find({"shop_id": shop_id}).to_list(length=None)
+    return [Service(**parse_from_mongo(s)) for s in services]
+
+@api_router.post("/shops/{shop_id}/services", response_model=Service)
+async def add_service(shop_id: str, request: ServiceCreateRequest, current_user: User = Depends(get_current_user)):
+    """Add a service to a shop"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    # Check if the service already exists in this shop with the same name/phone? 
+    # Usually phone is the unique key for people.
+    existing_service = await db.services.find_one({"shop_id": shop_id, "phone": request.phone})
+    if existing_service:
+        raise HTTPException(status_code=400, detail="Service with this phone number already exists")
+    
+    service = Service(
+        shop_id=shop_id,
+        name=request.name,
+        phone=request.phone,
+        nickname=request.nickname,
+        category=request.category,
+        service_rate=request.service_rate,
+        service_rate_type=request.service_rate_type,
+        is_verified=False
+    )
+    
+    service_dict = prepare_for_mongo(service.dict())
+    await db.services.insert_one(service_dict)
+    return service
+
+@api_router.get("/shops/{shop_id}/services/{service_id}", response_model=Service)
+async def get_service(shop_id: str, service_id: str, current_user: User = Depends(get_current_user)):
+    """Get a specific service's details"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
+    if not service:
+        # Fallback for legacy where ID might be MongoDB _id
+        try:
+            from bson import ObjectId
+            service = await db.services.find_one({"_id": ObjectId(service_id), "shop_id": shop_id})
+        except:
+            pass
+            
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    return Service(**parse_from_mongo(service))
+
+@api_router.put("/shops/{shop_id}/services/{service_id}", response_model=Service)
+async def update_service(shop_id: str, service_id: str, request: ServiceUpdateRequest, current_user: User = Depends(get_current_user)):
+    """Update service details"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
+    if not service:
+        try:
+            from bson import ObjectId
+            service = await db.services.find_one({"_id": ObjectId(service_id), "shop_id": shop_id})
+        except:
+            pass
+            
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    update_data = {k: v for k, v in request.dict().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update data provided")
+
+    # Use the internal _id if the search was by _id
+    target_filter = {"_id": service["_id"]} if "_id" in service else {"id": service_id, "shop_id": shop_id}
+    await db.services.update_one(target_filter, {"$set": update_data})
+
+    updated_service = await db.services.find_one(target_filter)
+    return Service(**parse_from_mongo(updated_service))
+
+@api_router.put("/shops/{shop_id}/services/{service_id}/service_data", response_model=Service)
+async def update_service_attendance(
+    shop_id: str, 
+    service_id: str, 
+    request: dict = Body(...),
+    current_user: User = Depends(get_current_user)
+):
+    """Specific endpoint to update service rate and calendar logs for Services."""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
+    if not service:
+        try:
+            from bson import ObjectId
+            service = await db.services.find_one({"_id": ObjectId(service_id), "shop_id": shop_id})
+        except:
+            pass
+            
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+        
+    # Same verification check as customers
+    if not service.get("is_verified", False):
+         raise HTTPException(
+            status_code=403, 
+            detail="Service is not verified. Please verify before updating attendance."
+        )
+
+    update_data = {}
+    if "service_rate" in request:
+        update_data["service_rate"] = request["service_rate"]
+    if "service_rate_type" in request:
+        update_data["service_rate_type"] = request["service_rate_type"]
+    if "service_log" in request:
+        update_data["service_log"] = request["service_log"]
+    elif "date" in request and "status" in request:
+        current_log = service.get("service_log", {}) or {}
+        current_log[request["date"]] = request["status"]
+        update_data["service_log"] = current_log
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid update data provided")
+
+    target_filter = {"_id": service["_id"]} if "_id" in service else {"id": service_id, "shop_id": shop_id}
+    await db.services.update_one(target_filter, {"$set": update_data})
+
+    updated_service = await db.services.find_one(target_filter)
+    return Service(**parse_from_mongo(updated_service))
+
+@api_router.delete("/shops/{shop_id}/services/{service_id}")
+async def delete_service(shop_id: str, service_id: str, current_user: User = Depends(get_current_user)):
+    """Delete a service (soft delete not implemented here, hard delete)"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Try UUID look up first
+    result = await db.services.delete_one({"id": service_id, "shop_id": shop_id})
+    
+    if result.deleted_count == 0:
+        # Fallback to _id
+        try:
+            from bson import ObjectId
+            result = await db.services.delete_one({"_id": ObjectId(service_id), "shop_id": shop_id})
+        except:
+            pass
+            
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Service not found")
+        
+    return {"success": True, "message": "Service deleted successfully"}
+
+# ==================== Staff Routes ====================
+
+@api_router.get("/shops/{shop_id}/staff", response_model=List[Staff])
+async def get_shop_staff(shop_id: str, current_user: User = Depends(get_current_user)):
+    """Get all staff members for a specific shop"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    staff_members = await db.staff.find({"shop_id": shop_id}).to_list(length=None)
+    return [Staff(**parse_from_mongo(s)) for s in staff_members]
+
+@api_router.post("/shops/{shop_id}/staff", response_model=Staff)
+async def add_staff(shop_id: str, request: StaffCreateRequest, current_user: User = Depends(get_current_user)):
+    """Add a staff member to a shop"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Business not found")
+    
+    existing_staff = await db.staff.find_one({"shop_id": shop_id, "phone": request.phone})
+    if existing_staff:
+        raise HTTPException(status_code=400, detail="Staff member with this phone number already exists")
+    
+    staff = Staff(
+        shop_id=shop_id,
+        name=request.name,
+        phone=request.phone,
+        nickname=request.nickname,
+        role=request.role,
+        service_rate=request.service_rate,
+        service_rate_type=request.service_rate_type,
+        is_verified=False
+    )
+    
+    staff_dict = prepare_for_mongo(staff.dict())
+    await db.staff.insert_one(staff_dict)
+    return staff
+
+@api_router.get("/shops/{shop_id}/staff/{staff_id}", response_model=Staff)
+async def get_staff(shop_id: str, staff_id: str, current_user: User = Depends(get_current_user)):
+    """Get a specific staff member's details"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    staff = await db.staff.find_one({"id": staff_id, "shop_id": shop_id})
+    if not staff:
+        try:
+            from bson import ObjectId
+            staff = await db.staff.find_one({"_id": ObjectId(staff_id), "shop_id": shop_id})
+        except:
+            pass
+            
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    return Staff(**parse_from_mongo(staff))
+
+@api_router.put("/shops/{shop_id}/staff/{staff_id}", response_model=Staff)
+async def update_staff(shop_id: str, staff_id: str, request: StaffUpdateRequest, current_user: User = Depends(get_current_user)):
+    """Update staff details"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    staff = await db.staff.find_one({"id": staff_id, "shop_id": shop_id})
+    if not staff:
+        try:
+            from bson import ObjectId
+            staff = await db.staff.find_one({"_id": ObjectId(staff_id), "shop_id": shop_id})
+        except:
+            pass
+            
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    update_data = {k: v for k, v in request.dict().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update data provided")
+
+    target_filter = {"_id": staff["_id"]} if "_id" in staff else {"id": staff_id, "shop_id": shop_id}
+    await db.staff.update_one(target_filter, {"$set": update_data})
+
+    updated_staff = await db.staff.find_one(target_filter)
+    return Staff(**parse_from_mongo(updated_staff))
+
+@api_router.put("/shops/{shop_id}/staff/{staff_id}/service_data", response_model=Staff)
+async def update_staff_attendance(
+    shop_id: str, 
+    staff_id: str, 
+    request: dict = Body(...),
+    current_user: User = Depends(get_current_user)
+):
+    """Specific endpoint to update service rate and calendar logs for Staff."""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    staff = await db.staff.find_one({"id": staff_id, "shop_id": shop_id})
+    if not staff:
+        try:
+            from bson import ObjectId
+            staff = await db.staff.find_one({"_id": ObjectId(staff_id), "shop_id": shop_id})
+        except:
+            pass
+            
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+        
+    if not staff.get("is_verified", False):
+         raise HTTPException(
+            status_code=403, 
+            detail="Staff is not verified. Please verify before updating attendance."
+        )
+
+    update_data = {}
+    if "service_rate" in request:
+        update_data["service_rate"] = request["service_rate"]
+    if "service_rate_type" in request:
+        update_data["service_rate_type"] = request["service_rate_type"]
+    if "service_log" in request:
+        update_data["service_log"] = request["service_log"]
+    elif "date" in request and "status" in request:
+        current_log = staff.get("service_log", {}) or {}
+        current_log[request["date"]] = request["status"]
+        update_data["service_log"] = current_log
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid update data provided")
+
+    target_filter = {"_id": staff["_id"]} if "_id" in staff else {"id": staff_id, "shop_id": shop_id}
+    await db.staff.update_one(target_filter, {"$set": update_data})
+
+    updated_staff = await db.staff.find_one(target_filter)
+    return Staff(**parse_from_mongo(updated_staff))
+
+@api_router.delete("/shops/{shop_id}/staff/{staff_id}")
+async def delete_staff(shop_id: str, staff_id: str, current_user: User = Depends(get_current_user)):
+    """Delete a staff member"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    
+    result = await db.staff.delete_one({"id": staff_id, "shop_id": shop_id})
+    if result.deleted_count == 0:
+        try:
+            from bson import ObjectId
+            result = await db.staff.delete_one({"_id": ObjectId(staff_id), "shop_id": shop_id})
+        except:
+            pass
+            
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Staff not found")
+        
+    return {"success": True, "message": "Staff deleted successfully"}
 
 @api_router.post("/shops/{shop_id}/customers/{customer_id}/notify-payment")
 async def notify_customer_payment(shop_id: str, customer_id: str, request: PushNotificationRequest, current_user: User = Depends(get_current_user)):
@@ -1420,6 +1828,115 @@ async def notify_customer_payment(shop_id: str, customer_id: str, request: PushN
     
     return {"success": True, "message": f"{request.method} request logged successfully"}
 
+@api_router.post("/shops/{shop_id}/services/{service_id}/notify-payment")
+async def notify_service_payment(shop_id: str, service_id: str, request: PushNotificationRequest, current_user: User = Depends(get_current_user)):
+    """Send a push notification to a service for payment request and log it"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    # Find the User document associated with this service's phone number to get FCM token
+    user = await db.users.find_one({"phone": service["phone"]})
+
+    if (request.method or "Push Notification") == "Push Notification":
+        if user:
+            if not user.get("push_enabled", True):
+                raise HTTPException(status_code=400, detail="User has disabled push notifications in their preferences.")
+            
+            if not user.get("payment_alerts_enabled", True):
+                raise HTTPException(status_code=400, detail="User has disabled payment alerts in their preferences.")
+    
+    # Logic for logging the request
+    payment_req = PaymentRequest(
+        shop_id=shop_id,
+        customer_id=service_id, # Using customer_id field for service_id in payment_requests collection
+        amount=abs(service.get("balance", 0)),
+        method=request.method or "Push Notification",
+        title=request.title,
+        message=request.body,
+        status="pending" if request.scheduled_at else "sent",
+        scheduled_at=request.scheduled_at
+    )
+    
+    # Store the record
+    await db.payment_requests.insert_one(prepare_for_mongo(payment_req.dict()))
+
+    if request.scheduled_at:
+        return {"success": True, "message": "Reminder scheduled successfully", "id": payment_req.id}
+
+    if (request.method or "Push Notification") == "Push Notification":
+        if not user:
+            raise HTTPException(status_code=404, detail="User has not registered on the app yet. Try SMS or WhatsApp.")
+        
+        if not user.get("fcm_token"):
+            raise HTTPException(status_code=400, detail="User has not enabled push notifications.")
+
+        logger.info(f"Sending Push to Service: Title='{request.title}', Body='{request.body}' to token '...{user['fcm_token'][-10:]}'")
+        
+        # Send Firebase Push Notification
+        try:
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=request.title,
+                    body=request.body,
+                ),
+                android=messaging.AndroidConfig(
+                    notification=messaging.AndroidNotification(
+                        color="#304FFE",
+                        channel_id="default"
+                    )
+                ),
+                data=request.data or {},
+                token=user["fcm_token"],
+            )
+            response = messaging.send(message)
+            return {"success": True, "message_id": response, "message": "Notification sent successfully"}
+        except Exception as e:
+            print(f"Error sending push notification: {e}")
+            await db.payment_requests.update_one({"id": payment_req.id}, {"$set": {"status": "failed"}})
+            raise HTTPException(status_code=500, detail=f"Failed to send push notification: {str(e)}")
+    
+    return {"success": True, "message": f"{request.method} request logged successfully"}
+
+@api_router.get("/shops/{shop_id}/services/{service_id}/notifications")
+async def get_service_notifications(shop_id: str, service_id: str, current_user: User = Depends(get_current_user)):
+    """Get notification history for a specific service"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Use customer_id field in payment_requests which stores service_id/customer_id
+    notifications = await db.payment_requests.find({
+        "shop_id": shop_id,
+        "customer_id": service_id
+    }).sort("created_at", -1).to_list(length=100)
+    
+    return [PaymentRequest(**parse_from_mongo(n)) for n in notifications]
+
+@api_router.post("/shops/{shop_id}/services/{service_id}/send-verification")
+async def send_service_verification_link(shop_id: str, service_id: str, current_user: User = Depends(get_current_user)):
+    """Generate a verification link for a service"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    # Reuse the same public verification endpoint, it will handle both collections
+    verification_link = f"https://xmunim-backend.onrender.com/api/public/verify-customer/{service_id}"
+    
+    return {
+        "success": True, 
+        "verification_link": verification_link,
+        "message": "Verification link generated successfully"
+    }
+
 @api_router.post("/shops/{shop_id}/customers/{customer_id}/send-verification")
 async def send_verification_link(shop_id: str, customer_id: str, current_user: User = Depends(get_current_user)):
     """Generate a verification link for a customer"""
@@ -1430,6 +1947,35 @@ async def send_verification_link(shop_id: str, customer_id: str, current_user: U
     customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+
+    # Reuse the same public verification endpoint
+    verification_link = f"https://xmunim-backend.onrender.com/api/public/verify-customer/{customer_id}"
+    
+    return {
+        "success": True, 
+        "verification_link": verification_link,
+        "message": "Verification link generated successfully"
+    }
+
+@api_router.post("/shops/{shop_id}/staff/{staff_id}/send-verification")
+async def send_staff_verification_link(shop_id: str, staff_id: str, current_user: User = Depends(get_current_user)):
+    """Generate a verification link for a staff member"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    staff = await db.staff.find_one({"id": staff_id, "shop_id": shop_id})
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    # Reuse the same public verification endpoint
+    verification_link = f"https://xmunim-backend.onrender.com/api/public/verify-customer/{staff_id}"
+    
+    return {
+        "success": True, 
+        "verification_link": verification_link,
+        "message": "Verification link generated successfully"
+    }
 
     # In a real app, this would be a deep link to the app or a hosted page
     # For MVP, we'll return a link to our public verification endpoint
@@ -1445,11 +1991,19 @@ async def send_verification_link(shop_id: str, customer_id: str, current_user: U
 @api_router.get("/public/verify-customer/{customer_id}")
 async def view_verify_customer(customer_id: str):
     """Public endpoint to view the customer verification page"""
-    logger.info(f"Verification page requested for customer: {customer_id}")
+    logger.info(f"Verification page requested for account: {customer_id}")
     try:
+        # Check customers collection first
         customer = await db.customers.find_one({"id": customer_id})
+        collection_name = "customers"
+        
+        # If not found, check services collection
         if not customer:
-            logger.warning(f"Customer not found for verification: {customer_id}")
+            customer = await db.services.find_one({"id": customer_id})
+            collection_name = "services"
+            
+        if not customer:
+            logger.warning(f"Account not found for verification: {customer_id}")
             return HTMLResponse(
                 content="""
                 <html>
@@ -1761,10 +2315,20 @@ async def view_verify_customer(customer_id: str):
 
 @api_router.post("/public/verify-customer/{customer_id}")
 async def do_verify_customer(customer_id: str):
-    """Explicitly mark customer verified via API"""
+    """Explicitly mark customer (or service) verified via API"""
+    # Check customers collection first
     customer = await db.customers.find_one({"id": customer_id})
+    collection = db.customers
+    type_name = "Customer"
+    
     if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
+        # Check services collection
+        customer = await db.services.find_one({"id": customer_id})
+        collection = db.services
+        type_name = "Member"
+        
+    if not customer:
+        raise HTTPException(status_code=404, detail="Account not found")
     
     shop = await db.shops.find_one({"id": customer.get("shop_id")})
     shop_name = shop.get("name", "XMunim") if shop else "XMunim"
@@ -1772,11 +2336,11 @@ async def do_verify_customer(customer_id: str):
     if customer.get("is_verified", False):
         return {"success": True, "message": "Already verified", "shop_name": shop_name}
         
-    await db.customers.update_one(
+    await collection.update_one(
         {"id": customer_id},
         {"$set": {"is_verified": True}}
     )
-    return {"success": True, "message": "Customer successfully verified", "shop_name": shop_name}
+    return {"success": True, "message": f"{type_name} successfully verified", "shop_name": shop_name}
 
 @api_router.post("/shops/{shop_id}/transactions", response_model=Transaction)
 async def create_transaction(shop_id: str, request: TransactionCreateRequest, current_user: User = Depends(get_current_user)):
@@ -2348,9 +2912,15 @@ async def view_connect_page(shop_code: str):
                         body: JSON.stringify({ name: name, phone: phone })
                     });
                     
-                    if (response.ok) {
+                    if (response.ok) {                 // Success: Hide form, show success
                         document.getElementById('formState').classList.add('hidden');
                         document.getElementById('successState').classList.remove('hidden');
+                        
+                        // Update success message based on type
+                        const successText = document.querySelector('#successState .success-box p:first-child');
+                        const shopName = document.querySelector('#formState h1').textContent.replace('Shop ', '');
+                        const isService = window.location.pathname.includes('service');
+                        successText.innerHTML = `You are now connected to <strong>${shopName}</strong> as a verified ${isService ? 'member' : 'customer'}.`;
                     } else if (response.status === 409) {
                         var data = await response.json();
                         document.getElementById('errorMessage').textContent = data.detail || 'This phone number is already connected as a customer.';
@@ -2708,12 +3278,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Logger is already configured at the top
 
 @app.on_event("startup")
 async def startup_event():
