@@ -3641,7 +3641,7 @@ async def get_assetlinks():
                 "package_name": "com.krutik3011.xmunimapp",
                 "sha256_cert_fingerprints": [
                     # IMPORTANT: This must be replaced with your production SHA-256 fingerprint
-                    "C9:20:87:BC:D3:7B:1D:86:30:D6:05:E2:A9:DA:B2:8A:47:8E:24:CE:C9:82:34:AC:7C:31:B7:0D:68:FA:E8:65"]
+                    "7C:8A:9D:14:B0:CA:9A:AB:A2:09:BF:B2:26:C0:9F:1A:43:3A:26:FA:6C:01:CE:F0:B0:26:04:54:9E:2B:5E:36"]
             }
         }
     ]
