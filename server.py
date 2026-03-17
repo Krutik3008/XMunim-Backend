@@ -26,6 +26,7 @@ import firebase_admin
 from firebase_admin import credentials, messaging
 import asyncio
 import requests
+from bson import ObjectId
 
 # Configure logging
 logging.basicConfig(
@@ -1321,6 +1322,13 @@ async def get_customer(shop_id: str, customer_id: str, current_user: User = Depe
 
     customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
     if not customer:
+        # Fallback for legacy where ID might be MongoDB _id
+        try:
+            customer = await db.customers.find_one({"_id": ObjectId(customer_id), "shop_id": shop_id})
+        except:
+            pass
+            
+    if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
     return Customer(**parse_from_mongo(customer))
@@ -1334,50 +1342,45 @@ async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdat
 
     customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
     if not customer:
+        try:
+            customer = await db.customers.find_one({"_id": ObjectId(customer_id), "shop_id": shop_id})
+        except:
+            pass
+            
+    if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    update_data = {}
-    if request.name is not None:
-        update_data["name"] = request.name
-    if request.phone is not None:
-        if customer.get("phone") != request.phone:
-            # Check if the new phone number already exists in this shop for the same type
-            target_type = request.type if hasattr(request, "type") and request.type else customer.get("type", "customer")
-            existing_customer = await db.customers.find_one({"shop_id": shop_id, "phone": request.phone, "type": target_type})
-            if existing_customer:
-                raise HTTPException(status_code=400, detail="Phone number already exists for this category")
-            
-            update_data["phone"] = request.phone
-            update_data["is_verified"] = False
-    if request.nickname is not None:
-        update_data["nickname"] = request.nickname
-    if hasattr(request, "type") and request.type is not None:
-        update_data["type"] = request.type
-    if request.is_auto_reminder_enabled is not None:
-        update_data["is_auto_reminder_enabled"] = request.is_auto_reminder_enabled
-    if request.auto_reminder_delay is not None:
-        update_data["auto_reminder_delay"] = request.auto_reminder_delay
-    if request.auto_reminder_frequency is not None:
-        update_data["auto_reminder_frequency"] = request.auto_reminder_frequency
-    if request.auto_reminder_method is not None:
-        update_data["auto_reminder_method"] = request.auto_reminder_method
-        
-    if hasattr(request, "service_rate") and request.service_rate is not None:
-        update_data["service_rate"] = request.service_rate
-    if hasattr(request, "service_rate_type") and request.service_rate_type is not None:
-        update_data["service_rate_type"] = request.service_rate_type
-    if hasattr(request, "service_log") and request.service_log is not None:
-        update_data["service_log"] = request.service_log
-
-    if not update_data:
+    # Get all fields explicitly provided in the request (including nulls)
+    request_data = request.dict(exclude_unset=True)
+    if not request_data:
         raise HTTPException(status_code=400, detail="No update data provided")
 
-    await db.customers.update_one(
-        {"id": customer_id, "shop_id": shop_id},
-        {"$set": update_data}
-    )
+    update_data = {}
+    for key, value in request_data.items():
+        if key == "phone":
+            if customer.get("phone") != value:
+                # Check if the new phone number already exists in this shop for the same type
+                target_type = request_data.get("type", customer.get("type", "customer"))
+                existing_customer = await db.customers.find_one({
+                    "shop_id": shop_id, 
+                    "phone": value, 
+                    "type": target_type
+                })
+                if existing_customer:
+                    raise HTTPException(status_code=400, detail="Phone number already exists for this category")
+                
+                update_data["phone"] = value
+                update_data["is_verified"] = False
+        else:
+            update_data[key] = value
 
-    updated_customer = await db.customers.find_one({"id": customer_id})
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid update data provided")
+
+    target_filter = {"_id": customer["_id"]} if "_id" in customer else {"id": customer_id, "shop_id": shop_id}
+    await db.customers.update_one(target_filter, {"$set": update_data})
+
+    updated_customer = await db.customers.find_one(target_filter)
     return Customer(**parse_from_mongo(updated_customer))
 
 @api_router.put("/shops/{shop_id}/customers/{customer_id}/service_data", response_model=Customer)
@@ -1427,12 +1430,10 @@ async def update_service_data(
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid update data provided")
 
-    await db.customers.update_one(
-        {"id": customer_id, "shop_id": shop_id},
-        {"$set": update_data}
-    )
+    target_filter = {"_id": customer["_id"]} if "_id" in customer else {"id": customer_id, "shop_id": shop_id}
+    await db.customers.update_one(target_filter, {"$set": update_data})
 
-    updated_customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
+    updated_customer = await db.customers.find_one(target_filter)
     return Customer(**parse_from_mongo(updated_customer))
 
 # ==================== Service Routes ====================
@@ -1514,7 +1515,7 @@ async def update_service(shop_id: str, service_id: str, request: ServiceUpdateRe
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    update_data = {k: v for k, v in request.dict().items() if v is not None}
+    update_data = request.dict(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
 
@@ -1754,7 +1755,7 @@ async def update_staff(shop_id: str, staff_id: str, request: StaffUpdateRequest,
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
 
-    update_data = {k: v for k, v in request.dict().items() if v is not None}
+    update_data = request.dict(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
 
