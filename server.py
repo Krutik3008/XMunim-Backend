@@ -1596,6 +1596,84 @@ async def delete_service(shop_id: str, service_id: str, current_user: User = Dep
         
     return {"success": True, "message": "Service deleted successfully"}
 
+@api_router.post("/shops/{shop_id}/services/{service_id}/notify-payment")
+async def notify_service_payment(shop_id: str, service_id: str, request: PushNotificationRequest, current_user: User = Depends(get_current_user)):
+    """Send a push notification to a service provider for payment request and log it"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    user = await db.users.find_one({"phone": service["phone"]})
+
+    if (request.method or "Push Notification") == "Push Notification":
+        if user:
+            if not user.get("push_enabled", True):
+                raise HTTPException(status_code=400, detail="Service provider has disabled push notifications.")
+            if not user.get("payment_alerts_enabled", True):
+                raise HTTPException(status_code=400, detail="Service provider has disabled payment alerts.")
+    
+    payment_req = PaymentRequest(
+        shop_id=shop_id,
+        customer_id=service_id, # Reusing customer_id field for target ID
+        amount=abs(service.get("balance", 0)),
+        method=request.method or "Push Notification",
+        title=request.title,
+        message=request.body,
+        status="pending" if request.scheduled_at else "sent",
+        scheduled_at=request.scheduled_at
+    )
+    
+    await db.payment_requests.insert_one(prepare_for_mongo(payment_req.dict()))
+
+    if request.scheduled_at:
+        return {"success": True, "message": "Reminder scheduled successfully", "id": payment_req.id}
+
+    if (request.method or "Push Notification") == "Push Notification":
+        if not user:
+            raise HTTPException(status_code=404, detail="Service provider has not registered on the app yet. Try SMS or WhatsApp.")
+        
+        if not user.get("fcm_token"):
+             raise HTTPException(status_code=400, detail="Service provider registered but FCM token is missing.")
+
+        try:
+            logger.info(f"Sending Push to Service: Title='{request.title}', Body='{request.body}'")
+            message = messaging.Message(
+                notification=messaging.Notification(title=request.title, body=request.body),
+                android=messaging.AndroidConfig(
+                    notification=messaging.AndroidNotification(
+                        color="#304FFE",
+                        channel_id="default"
+                    )
+                ),
+                data=(request.data or {}),
+                token=user["fcm_token"],
+            )
+            messaging.send(message)
+            return {"success": True, "message": "Push notification sent", "id": payment_req.id}
+        except Exception as e:
+            logger.error(f"FCM Send Error: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to send push: {str(e)}")
+
+    return {"success": True, "message": f"{request.method} request logged", "id": payment_req.id}
+
+@api_router.get("/shops/{shop_id}/services/{service_id}/notifications")
+async def get_service_payment_history(shop_id: str, service_id: str, current_user: User = Depends(get_current_user)):
+    """Get payment request history for a specific service in a shop"""
+    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found or access denied")
+
+    notifications = await db.payment_requests.find(
+        {"shop_id": shop_id, "customer_id": service_id},
+        sort=[("created_at", -1)]
+    ).to_list(length=None)
+
+    return [parse_from_mongo(noti) for noti in notifications]
+
 # ==================== Staff Routes ====================
 
 @api_router.get("/shops/{shop_id}/staff", response_model=List[Staff])
