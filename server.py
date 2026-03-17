@@ -2651,25 +2651,51 @@ async def get_shop_dashboard(shop_id: str, current_user: User = Depends(get_curr
 
 @api_router.get("/customer/ledger")
 async def get_customer_ledger(current_user: User = Depends(get_current_user)):
-    """Get customer's ledger across all shops"""
+    """Get customer's ledger across all shops (including staff/services)"""
     if current_user.active_role != "customer":
         raise HTTPException(status_code=403, detail="Only customers can view ledger")
     
-    # Filter customers by phone number to find all linked shop records
-    customers = await db.customers.find({
-        "phone": current_user.phone
-    }).to_list(length=None)
+    phone = current_user.phone
+    
+    # Filter by phone number to find all linked shop records across collections
+    customers = await db.customers.find({"phone": phone}).to_list(length=None)
+    staff_members = await db.staff.find({"phone": phone}).to_list(length=None)
+    services = await db.services.find({"phone": phone}).to_list(length=None)
     
     ledger_data = []
+    
+    # Process customers
     for customer in customers:
         shop = await db.shops.find_one({"id": customer["shop_id"]})
         if shop:
             transactions = await db.transactions.find({"customer_id": customer["id"]}).sort("created_at", -1).to_list(length=None)
-            
             ledger_data.append({
                 "shop": Shop(**parse_from_mongo(shop)),
                 "customer": Customer(**parse_from_mongo(customer)),
-                "transactions": [Transaction(**parse_from_mongo(t)) for t in transactions]
+                "transactions": [Transaction(**parse_from_mongo(t)) for t in transactions],
+                "type": "customer"
+            })
+            
+    # Process staff
+    for staff in staff_members:
+        shop = await db.shops.find_one({"id": staff["shop_id"]})
+        if shop:
+            ledger_data.append({
+                "shop": Shop(**parse_from_mongo(shop)),
+                "customer": Staff(**parse_from_mongo(staff)),
+                "transactions": [],
+                "type": "staff"
+            })
+
+    # Process services
+    for service in services:
+        shop = await db.shops.find_one({"id": service["shop_id"]})
+        if shop:
+            ledger_data.append({
+                "shop": Shop(**parse_from_mongo(shop)),
+                "customer": Service(**parse_from_mongo(service)),
+                "transactions": [],
+                "type": "services"
             })
     
     return ledger_data
