@@ -2027,6 +2027,52 @@ async def notify_service_payment(shop_id: str, service_id: str, request: PushNot
     
     return {"success": True, "message": f"{request.method} request logged successfully"}
 
+@api_router.post("/shops/{shop_id}/notify-owner")
+async def notify_shop_owner(shop_id: str, request: PushNotificationRequest, current_user: User = Depends(get_current_user)):
+    """Send a push notification from staff/customer to the shop owner"""
+    shop = await db.shops.find_one({"id": shop_id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    owner = await db.users.find_one({"id": shop["owner_id"]})
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+
+    if (request.method or "Push Notification") == "Push Notification":
+        if not owner.get("push_enabled", True):
+            raise HTTPException(status_code=400, detail="Shop owner has disabled push notifications in their preferences.")
+        
+        if not owner.get("payment_alerts_enabled", True):
+            raise HTTPException(status_code=400, detail="Shop owner has disabled payment alerts in their preferences.")
+            
+        if not owner.get("fcm_token"):
+            raise HTTPException(status_code=400, detail="Shop owner has not enabled push notifications on their device.")
+
+        logger.info(f"Sending Push to Owner: Title='{request.title}', Body='{request.body}' to token '...{owner['fcm_token'][-10:]}'")
+        
+        try:
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=request.title,
+                    body=request.body,
+                ),
+                android=messaging.AndroidConfig(
+                    notification=messaging.AndroidNotification(
+                        color="#304FFE",
+                        channel_id="default"
+                    )
+                ),
+                data=request.data or {},
+                token=owner["fcm_token"],
+            )
+            response = messaging.send(message)
+            return {"success": True, "message_id": response, "message": "Notification sent to shop owner successfully"}
+        except Exception as e:
+            print(f"Error sending push notification to owner: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to send push notification: {str(e)}")
+            
+    return {"success": True, "message": f"{request.method} request sent successfully"}
+
 @api_router.get("/shops/{shop_id}/services/{service_id}/notifications")
 async def get_service_notifications(shop_id: str, service_id: str, current_user: User = Depends(get_current_user)):
     """Get notification history for a specific service"""
