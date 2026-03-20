@@ -3176,14 +3176,14 @@ async def get_admin_dashboard(admin_user: User = Depends(get_admin_user)):
     total_shops = await db.shops.count_documents({})
     total_customers = await db.customers.count_documents({})
     
-    thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30))
     recent_shop_transactions = await db.transactions.aggregate([
         {"$match": {"created_at": {"$gte": thirty_days_ago}}},
         {"$group": {"_id": "$shop_id"}}
     ]).to_list(length=None)
     active_shops = len(recent_shop_transactions)
     
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     today_transactions = await db.transactions.find({"created_at": {"$gte": today_start}}).to_list(length=None)
     daily_transactions_count = len(today_transactions)
     daily_transactions_amount = sum(t.get("amount", 0) for t in today_transactions)
@@ -3193,7 +3193,7 @@ async def get_admin_dashboard(admin_user: User = Depends(get_admin_user)):
     # Calculate total sales (only credit transactions)
     total_sales = sum(t.get("amount", 0) for t in all_transactions if str(t.get("type", "")).lower() == "credit")
     
-    seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7))
     new_users_count = await db.users.count_documents({"created_at": {"$gte": seven_days_ago}})
     
     return {
