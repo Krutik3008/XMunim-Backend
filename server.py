@@ -2173,6 +2173,11 @@ async def view_verify_customer(customer_id: str):
             customer = await db.services.find_one({"id": customer_id})
             collection_name = "services"
             
+        # If still not found, check staff collection
+        if not customer:
+            customer = await db.staff.find_one({"id": customer_id})
+            collection_name = "staff"
+            
         if not customer:
             logger.warning(f"Account not found for verification: {customer_id}")
             return HTMLResponse(
@@ -2496,7 +2501,13 @@ async def do_verify_customer(customer_id: str):
         # Check services collection
         customer = await db.services.find_one({"id": customer_id})
         collection = db.services
-        type_name = "Member"
+        type_name = "Service Member"
+        
+    if not customer:
+        # Check staff collection
+        customer = await db.staff.find_one({"id": customer_id})
+        collection = db.staff
+        type_name = "Staff Member"
         
     if not customer:
         raise HTTPException(status_code=404, detail="Account not found")
