@@ -2652,8 +2652,10 @@ async def get_shop_dashboard(shop_id: str, current_user: User = Depends(get_curr
 @api_router.get("/customer/ledger")
 async def get_customer_ledger(current_user: User = Depends(get_current_user)):
     """Get customer's ledger across all shops (including staff/services)"""
-    if current_user.active_role != "customer":
-        raise HTTPException(status_code=403, detail="Only customers can view ledger")
+    # Corrected: Any authenticated user (customer, shop owner, or admin) can view their personal ledger 
+    # across shops, even if their active role is temporarily set to something else.
+    if current_user.active_role not in ["customer", "shop_owner", "admin"]:
+        raise HTTPException(status_code=403, detail="Only authorized users can view ledger")
     
     phone = current_user.phone
     
