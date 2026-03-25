@@ -3292,7 +3292,12 @@ async def get_admin_dashboard(admin_user: User = Depends(get_admin_user)):
     """Get admin dashboard with key metrics"""
     total_users = await db.users.count_documents({})
     total_shops = await db.shops.count_documents({})
-    total_customers = await db.customers.count_documents({})
+    
+    # Count all members (customers, staff, and services)
+    total_customers_count = await db.customers.count_documents({})
+    total_staff_count = await db.staff.count_documents({})
+    total_services_count = await db.services.count_documents({})
+    total_members = total_customers_count + total_staff_count + total_services_count
     
     thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30))
     recent_shop_transactions = await db.transactions.aggregate([
@@ -3318,7 +3323,7 @@ async def get_admin_dashboard(admin_user: User = Depends(get_admin_user)):
         "total_users": total_users,
         "total_shops": total_shops,
         "active_shops": active_shops,
-        "total_customers": total_customers,
+        "total_customers": total_members,
         "daily_transactions": {
             "count": daily_transactions_count,
             "amount": daily_transactions_amount
