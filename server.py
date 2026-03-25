@@ -2688,6 +2688,56 @@ async def delete_product(shop_id: str, product_id: str, current_user: User = Dep
     
     return {"message": "Product deleted successfully"}
 
+def calculate_service_earnings(service_obj, target_date=None):
+    """Calculate earnings for a service member based on their service_log for the current month."""
+    if not target_date:
+        target_date = datetime.now()
+    
+    service_log = service_obj.get("service_log", {}) or {}
+    rate = service_obj.get("service_rate", 0)
+    rate_type = service_obj.get("service_rate_type", "daily")
+    
+    year = target_date.year
+    month = target_date.month
+    
+    # Calculate days in month
+    if month == 12:
+        next_month = datetime(year + 1, 1, 1)
+    else:
+        next_month = datetime(year, month + 1, 1)
+    days_in_month = (next_month - timedelta(days=1)).day
+    
+    month_prefix = f"{year}-{month:02d}"
+    
+    total = 0
+    if rate_type == "monthly":
+        absent_count = 0
+        for date_str, entry in service_log.items():
+            if date_str.startswith(month_prefix):
+                status = entry.get("status") if isinstance(entry, dict) else entry
+                if status == "absent":
+                    absent_count += 1
+        daily_rate = rate / (days_in_month or 30)
+        total = max(0, rate - (absent_count * daily_rate))
+    elif rate_type == "hourly":
+        for date_str, entry in service_log.items():
+            if date_str.startswith(month_prefix) and isinstance(entry, dict):
+                if entry.get("status") == "present":
+                    if "hours_log" in entry and entry["hours_log"]:
+                        for log in entry["hours_log"]:
+                            total += (log.get("hours", 0) * log.get("rate", rate))
+                    else:
+                        total += (entry.get("hours", 0) * entry.get("rate", rate))
+    else: # daily
+        for date_str, entry in service_log.items():
+            if date_str.startswith(month_prefix):
+                status = entry.get("status") if isinstance(entry, dict) else entry
+                if status == "present":
+                    # Use stored rate if available, else global rate
+                    entry_rate = entry.get("rate", rate) if isinstance(entry, dict) else rate
+                    total += entry_rate
+    return total
+
 @api_router.get("/shops/{shop_id}/dashboard")
 async def get_shop_dashboard(shop_id: str, current_user: User = Depends(get_current_user)):
     """Get shop dashboard data"""
@@ -2700,15 +2750,36 @@ async def get_shop_dashboard(shop_id: str, current_user: User = Depends(get_curr
         raise HTTPException(status_code=404, detail="Shop not found")
     
     total_customers = await db.customers.count_documents({"shop_id": shop_id})
+    total_staff = await db.staff.count_documents({"shop_id": shop_id})
+    total_services = await db.services.count_documents({"shop_id": shop_id})
+    
+    # Dues for customers (based on negative balance)
     customers_with_dues = await db.customers.find({"shop_id": shop_id, "balance": {"$lt": 0}}).to_list(length=None)
-    total_pending_dues = sum(abs(customer.get("balance", 0)) for customer in customers_with_dues)
+    total_customer_dues = sum(abs(m.get("balance", 0)) for m in customers_with_dues)
+    
+    # Dues for services (based on attendance logs for current month)
+    all_services = await db.services.find({"shop_id": shop_id}).to_list(length=None)
+    service_earnings_total = 0
+    services_with_dues_count = 0
+    for s in all_services:
+        earnings = calculate_service_earnings(s)
+        # Any earnings to be paid are considered "dues" for the shop owner
+        if earnings > 0:
+            service_earnings_total += earnings
+            services_with_dues_count += 1
+            
+    total_pending_dues = total_customer_dues + service_earnings_total
+    
     recent_transactions = await db.transactions.find({"shop_id": shop_id}).sort("created_at", -1).limit(5).to_list(length=None)
     total_products = await db.products.count_documents({"shop_id": shop_id, "active": True})
     
     return {
         "shop": Shop(**parse_from_mongo(shop)),
         "total_customers": total_customers,
-        "customers_with_dues": len(customers_with_dues),
+        "total_staff": total_staff,
+        "total_services": total_services,
+        "total_members": total_customers + total_staff + total_services,
+        "customers_with_dues": len(customers_with_dues) + services_with_dues_count,
         "total_pending_dues": total_pending_dues,
         "total_products": total_products,
         "recent_transactions": [Transaction(**parse_from_mongo(t)) for t in recent_transactions]
