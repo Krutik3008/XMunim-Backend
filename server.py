@@ -2710,6 +2710,7 @@ def calculate_service_earnings(service_obj, target_date=None):
     month_prefix = f"{year}-{month:02d}"
     
     total = 0
+    # Monthly mode is a global discount-based calculation
     if rate_type == "monthly":
         absent_count = 0
         for date_str, entry in service_log.items():
@@ -2719,23 +2720,34 @@ def calculate_service_earnings(service_obj, target_date=None):
                     absent_count += 1
         daily_rate = rate / (days_in_month or 30)
         total = max(0, rate - (absent_count * daily_rate))
-    elif rate_type == "hourly":
-        for date_str, entry in service_log.items():
-            if date_str.startswith(month_prefix) and isinstance(entry, dict):
-                if entry.get("status") == "present":
-                    if "hours_log" in entry and entry["hours_log"]:
-                        for log in entry["hours_log"]:
-                            total += (log.get("hours", 0) * log.get("rate", rate))
-                    else:
-                        total += (entry.get("hours", 0) * entry.get("rate", rate))
-    else: # daily
+    else:
+        # Hybrid Daily/Hourly mode
         for date_str, entry in service_log.items():
             if date_str.startswith(month_prefix):
-                status = entry.get("status") if isinstance(entry, dict) else entry
-                if status == "present":
-                    # Use stored rate if available, else global rate
-                    entry_rate = entry.get("rate", rate) if isinstance(entry, dict) else rate
-                    total += entry_rate
+                if not isinstance(entry, dict):
+                    # Legacy string status: treat as current global mode (likely daily)
+                    if entry == "present":
+                        total += rate
+                    continue
+                
+                if entry.get("status") == "present":
+                    # Determine entry-level rate type
+                    entry_rate_type = entry.get("rate_type")
+                    if not entry_rate_type:
+                        # Infer from hours
+                        entry_rate_type = "hourly" if entry.get("hours", 0) > 0 else "daily"
+                    
+                    entry_rate = entry.get("rate", rate)
+                    
+                    if entry_rate_type == "hourly":
+                        if "hours_log" in entry and entry["hours_log"]:
+                            for h_log in entry["hours_log"]:
+                                total += (h_log.get("hours", 0) * h_log.get("rate", entry_rate))
+                        else:
+                            total += (entry.get("hours", 0) * entry_rate)
+                    else:
+                        # Daily
+                        total += entry_rate
     return total
 
 @api_router.get("/shops/{shop_id}/dashboard")
