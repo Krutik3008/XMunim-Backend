@@ -1163,9 +1163,10 @@ async def get_my_shops(current_user: User = Depends(get_current_user)):
 async def update_shop(shop_id: str, request: ShopUpdateRequest, current_user: User = Depends(get_current_user)):
     """Update shop details"""
     # Verify ownership
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
     
     update_data = {k: v for k, v in request.dict().items() if v is not None}
     
@@ -1326,9 +1327,10 @@ async def add_customer(shop_id: str, request: CustomerCreateRequest, current_use
 @api_router.get("/shops/{shop_id}/customers/{customer_id}", response_model=Customer)
 async def get_customer(shop_id: str, customer_id: str, current_user: User = Depends(get_current_user)):
     """Get a specific customer's details"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
     if not customer:
@@ -1346,9 +1348,10 @@ async def get_customer(shop_id: str, customer_id: str, current_user: User = Depe
 @api_router.put("/shops/{shop_id}/customers/{customer_id}", response_model=Customer)
 async def update_customer(shop_id: str, customer_id: str, request: CustomerUpdateRequest, current_user: User = Depends(get_current_user)):
     """Update customer details"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
     if not customer:
@@ -1403,9 +1406,10 @@ async def update_service_data(
     """Specific endpoint to update service rate and calendar logs for Staff/Services.
     Accepts keys: service_rate, service_rate_type, service_log OR date & status to update a single record.
     """
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
     if not customer:
@@ -1451,9 +1455,10 @@ async def update_service_data(
 @api_router.get("/shops/{shop_id}/services")
 async def get_shop_services(shop_id: str, current_user: User = Depends(get_current_user)):
     """Get all services for a specific shop"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
     
     services = await db.services.find({"shop_id": shop_id}).to_list(length=None)
     return [Service(**parse_from_mongo(s)) for s in services]
@@ -1489,9 +1494,10 @@ async def add_service(shop_id: str, request: ServiceCreateRequest, current_user:
 @api_router.get("/shops/{shop_id}/services/{service_id}", response_model=Service)
 async def get_service(shop_id: str, service_id: str, current_user: User = Depends(get_current_user)):
     """Get a specific service's details"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
     if not service:
@@ -1510,9 +1516,10 @@ async def get_service(shop_id: str, service_id: str, current_user: User = Depend
 @api_router.put("/shops/{shop_id}/services/{service_id}", response_model=Service)
 async def update_service(shop_id: str, service_id: str, request: ServiceUpdateRequest, current_user: User = Depends(get_current_user)):
     """Update service details"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
     if not service:
@@ -1565,9 +1572,10 @@ async def update_service_attendance(
     current_user: User = Depends(get_current_user)
 ):
     """Specific endpoint to update service rate and calendar logs for Services."""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
     if not service:
@@ -1611,9 +1619,10 @@ async def update_service_attendance(
 @api_router.delete("/shops/{shop_id}/services/{service_id}")
 async def delete_service(shop_id: str, service_id: str, current_user: User = Depends(get_current_user)):
     """Delete a service (soft delete not implemented here, hard delete)"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
     
     # Try UUID look up first
     result = await db.services.delete_one({"id": service_id, "shop_id": shop_id})
@@ -1634,9 +1643,10 @@ async def delete_service(shop_id: str, service_id: str, current_user: User = Dep
 @api_router.post("/shops/{shop_id}/services/{service_id}/notify-payment")
 async def notify_service_payment(shop_id: str, service_id: str, request: PushNotificationRequest, current_user: User = Depends(get_current_user)):
     """Send a push notification to a service provider for payment request and log it"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
     if not service:
@@ -1714,9 +1724,10 @@ async def get_service_payment_history(shop_id: str, service_id: str, current_use
 @api_router.get("/shops/{shop_id}/staff", response_model=List[Staff])
 async def get_shop_staff(shop_id: str, current_user: User = Depends(get_current_user)):
     """Get all staff members for a specific shop"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
     
     staff_members = await db.staff.find({"shop_id": shop_id}).to_list(length=None)
     return [Staff(**parse_from_mongo(s)) for s in staff_members]
@@ -1751,9 +1762,10 @@ async def add_staff(shop_id: str, request: StaffCreateRequest, current_user: Use
 @api_router.get("/shops/{shop_id}/staff/{staff_id}", response_model=Staff)
 async def get_staff(shop_id: str, staff_id: str, current_user: User = Depends(get_current_user)):
     """Get a specific staff member's details"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     staff = await db.staff.find_one({"id": staff_id, "shop_id": shop_id})
     if not staff:
@@ -1771,9 +1783,10 @@ async def get_staff(shop_id: str, staff_id: str, current_user: User = Depends(ge
 @api_router.put("/shops/{shop_id}/staff/{staff_id}", response_model=Staff)
 async def update_staff(shop_id: str, staff_id: str, request: StaffUpdateRequest, current_user: User = Depends(get_current_user)):
     """Update staff details"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     staff = await db.staff.find_one({"id": staff_id, "shop_id": shop_id})
     if not staff:
@@ -1825,9 +1838,10 @@ async def update_staff_attendance(
     current_user: User = Depends(get_current_user)
 ):
     """Specific endpoint to update service rate and calendar logs for Staff."""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     staff = await db.staff.find_one({"id": staff_id, "shop_id": shop_id})
     if not staff:
@@ -1870,9 +1884,10 @@ async def update_staff_attendance(
 @api_router.delete("/shops/{shop_id}/staff/{staff_id}")
 async def delete_staff(shop_id: str, staff_id: str, current_user: User = Depends(get_current_user)):
     """Delete a staff member"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
     
     result = await db.staff.delete_one({"id": staff_id, "shop_id": shop_id})
     if result.deleted_count == 0:
@@ -1890,9 +1905,10 @@ async def delete_staff(shop_id: str, staff_id: str, current_user: User = Depends
 @api_router.post("/shops/{shop_id}/customers/{customer_id}/notify-payment")
 async def notify_customer_payment(shop_id: str, customer_id: str, request: PushNotificationRequest, current_user: User = Depends(get_current_user)):
     """Send a push notification to a customer for payment request and log it"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
     if not customer:
@@ -1966,9 +1982,10 @@ async def notify_customer_payment(shop_id: str, customer_id: str, request: PushN
 @api_router.post("/shops/{shop_id}/services/{service_id}/notify-payment")
 async def notify_service_payment(shop_id: str, service_id: str, request: PushNotificationRequest, current_user: User = Depends(get_current_user)):
     """Send a push notification to a service for payment request and log it"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
     if not service:
@@ -2086,9 +2103,10 @@ async def notify_shop_owner(shop_id: str, request: PushNotificationRequest, curr
 @api_router.get("/shops/{shop_id}/services/{service_id}/notifications")
 async def get_service_notifications(shop_id: str, service_id: str, current_user: User = Depends(get_current_user)):
     """Get notification history for a specific service"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     # Use customer_id field in payment_requests which stores service_id/customer_id
     notifications = await db.payment_requests.find({
@@ -2101,9 +2119,10 @@ async def get_service_notifications(shop_id: str, service_id: str, current_user:
 @api_router.post("/shops/{shop_id}/services/{service_id}/send-verification")
 async def send_service_verification_link(shop_id: str, service_id: str, current_user: User = Depends(get_current_user)):
     """Generate a verification link for a service"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     service = await db.services.find_one({"id": service_id, "shop_id": shop_id})
     if not service:
@@ -2121,9 +2140,10 @@ async def send_service_verification_link(shop_id: str, service_id: str, current_
 @api_router.post("/shops/{shop_id}/customers/{customer_id}/send-verification")
 async def send_verification_link(shop_id: str, customer_id: str, current_user: User = Depends(get_current_user)):
     """Generate a verification link for a customer"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     customer = await db.customers.find_one({"id": customer_id, "shop_id": shop_id})
     if not customer:
@@ -2141,9 +2161,10 @@ async def send_verification_link(shop_id: str, customer_id: str, current_user: U
 @api_router.post("/shops/{shop_id}/staff/{staff_id}/send-verification")
 async def send_staff_verification_link(shop_id: str, staff_id: str, current_user: User = Depends(get_current_user)):
     """Generate a verification link for a staff member"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
 
     staff = await db.staff.find_one({"id": staff_id, "shop_id": shop_id})
     if not staff:
@@ -2537,9 +2558,10 @@ async def do_verify_customer(customer_id: str):
 @api_router.post("/shops/{shop_id}/transactions", response_model=Transaction)
 async def create_transaction(shop_id: str, request: TransactionCreateRequest, current_user: User = Depends(get_current_user)):
     """Create a new transaction"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
     
     customer = await db.customers.find_one({"id": request.customer_id, "shop_id": shop_id})
     if not customer:
@@ -2614,9 +2636,10 @@ async def get_shop_transactions(shop_id: str, current_user: User = Depends(get_c
 @api_router.post("/shops/{shop_id}/products", response_model=Product)
 async def create_product(shop_id: str, request: ProductCreateRequest, current_user: User = Depends(get_current_user)):
     """Create a new product for a shop"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
         
     # Check for existing product with same name (case-insensitive) in the same shop
     existing_product = await db.products.find_one({
@@ -2654,9 +2677,10 @@ async def get_shop_products(shop_id: str, current_user: User = Depends(get_curre
 @api_router.put("/shops/{shop_id}/products/{product_id}", response_model=Product)
 async def update_product(shop_id: str, product_id: str, request: ProductUpdateRequest, current_user: User = Depends(get_current_user)):
     """Update a product"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
     
     product = await db.products.find_one({"id": product_id, "shop_id": shop_id})
     if not product:
@@ -2678,9 +2702,10 @@ async def update_product(shop_id: str, product_id: str, request: ProductUpdateRe
 @api_router.delete("/shops/{shop_id}/products/{product_id}")
 async def delete_product(shop_id: str, product_id: str, current_user: User = Depends(get_current_user)):
     """Soft delete a product (mark as inactive)"""
-    shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+    if current_user.active_role != "admin":
+        shop = await db.shops.find_one({"id": shop_id, "owner_id": current_user.id})
+        if not shop:
+            raise HTTPException(status_code=404, detail="Shop not found")
     
     await db.products.delete_one(
         {"id": product_id, "shop_id": shop_id}
