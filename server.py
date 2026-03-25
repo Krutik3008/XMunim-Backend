@@ -1136,7 +1136,8 @@ async def create_shop(request: ShopCreateRequest, current_user: User = Depends(g
         state=request.state,
         country=request.country,
         location=request.location,
-        gst_number=request.gst_number
+        gst_number=request.gst_number,
+        upi_id=request.upi_id
     )
     
     shop_dict = prepare_for_mongo(shop.dict())
