@@ -135,6 +135,7 @@ class Customer(BaseModel):
     # Staff/Services specific fields
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None # 'daily', 'hourly', 'monthly'
+    service_daily_hours: Optional[float] = None
     service_log: Optional[Dict[str, Any]] = None # {"2026-03-12": {"status": "present", "rate": 55}}
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -147,6 +148,7 @@ class Service(BaseModel):
     category: Optional[str] = None # e.g. "Milk Delivery", "Cleaner"
     service_rate: float = 0.0
     service_rate_type: str = "daily" # 'daily', 'hourly', 'monthly'
+    service_daily_hours: Optional[float] = None
     service_log: Optional[Dict[str, Any]] = None # {"2026-03-12": {"status": "present", "rate": 55}}
     balance: float = 0.0
     is_verified: bool = False
@@ -170,6 +172,7 @@ class Staff(BaseModel):
     role: Optional[str] = None # e.g. "Chef", "Delivery Boy"
     service_rate: float = 0.0
     service_rate_type: str = "daily" # 'daily', 'hourly', 'monthly'
+    service_daily_hours: Optional[float] = None
     service_log: Optional[Dict[str, Any]] = None 
     balance: float = 0.0
     upi_id: Optional[str] = None
@@ -281,6 +284,7 @@ class CustomerCreateRequest(BaseModel):
     # Staff/Services specific fields
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None
+    service_daily_hours: Optional[float] = None
     service_log: Optional[Dict[str, Any]] = None
 
 class ServiceCreateRequest(BaseModel):
@@ -290,6 +294,7 @@ class ServiceCreateRequest(BaseModel):
     category: Optional[str] = None
     service_rate: float
     service_rate_type: str = "daily"
+    service_daily_hours: Optional[float] = None
 
 class ProductCreateRequest(BaseModel):
     name: str
@@ -307,6 +312,7 @@ class StaffCreateRequest(BaseModel):
     role: Optional[str] = None
     service_rate: float
     service_rate_type: str = "daily"
+    service_daily_hours: Optional[float] = None
     upi_id: Optional[str] = None
 
 class StaffUpdateRequest(BaseModel):
@@ -316,6 +322,7 @@ class StaffUpdateRequest(BaseModel):
     role: Optional[str] = None
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None
+    service_daily_hours: Optional[float] = None
     service_log: Optional[Dict[str, Any]] = None
     upi_id: Optional[str] = None
 
@@ -343,6 +350,7 @@ class CustomerUpdateRequest(BaseModel):
     # Staff/Services specific fields
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None
+    service_daily_hours: Optional[float] = None
     service_log: Optional[Dict[str, Any]] = None
     auto_reminder_message: Optional[str] = None
 
@@ -353,6 +361,7 @@ class ServiceUpdateRequest(BaseModel):
     category: Optional[str] = None
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None
+    service_daily_hours: Optional[float] = None
     service_log: Optional[Dict[str, Any]] = None
 
 class UserVerifyRequest(BaseModel):
