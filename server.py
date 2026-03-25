@@ -3856,7 +3856,7 @@ async def get_assetlinks():
             "relation": ["delegate_permission/common.handle_all_urls"],
             "target": {
                 "namespace": "android_app",
-                "package_name": "com.krutik3011.xmunimapp",
+                "package_name": "com.krutik3008.xmunimapp",
                 "sha256_cert_fingerprints": [
                     # IMPORTANT: This must be replaced with your production SHA-256 fingerprint
                     "7C:8A:9D:14:B0:CA:9A:AB:A2:09:BF:B2:26:C0:9F:1A:43:3A:26:FA:6C:01:CE:F0:B0:26:04:54:9E:2B:5E:36"]
