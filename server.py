@@ -3398,8 +3398,14 @@ async def get_all_transactions(admin_user: User = Depends(get_admin_user), skip:
     }
 
 @api_router.get("/admin/customers")
-async def get_all_customers(admin_user: User = Depends(get_admin_user), search: Optional[str] = None, skip: int = 0, limit: int = 100):
-    """Get all customers across all shops"""
+async def get_all_customers(
+    admin_user: User = Depends(get_admin_user), 
+    search: Optional[str] = None, 
+    member_type: str = "all",
+    skip: int = 0, 
+    limit: int = 100
+):
+    """Get all members (customers, staff, services) across all shops"""
     query = {}
     if search:
         query = {
@@ -3409,33 +3415,63 @@ async def get_all_customers(admin_user: User = Depends(get_admin_user), search: 
             ]
         }
     
-    customers = await db.customers.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(length=None)
-    total_count = await db.customers.count_documents(query)
+    all_results = []
     
-    customers_with_details = []
-    for customer in customers:
-        shop = await db.shops.find_one({"id": customer["shop_id"]})
-        customer_data = Customer(**parse_from_mongo(customer)).dict()
+    # Define which collections to search
+    collections_to_search = []
+    if member_type == "all":
+        collections_to_search = [
+            ("customer", db.customers),
+            ("staff", db.staff),
+            ("service", db.services)
+        ]
+    elif member_type == "customer":
+        collections_to_search = [("customer", db.customers)]
+    elif member_type == "staff":
+        collections_to_search = [("staff", db.staff)]
+    elif member_type == "service":
+        collections_to_search = [("service", db.services)]
+
+    # Fetch and combine
+    total_found = 0
+    for m_type, col in collections_to_search:
+        results = await col.find(query).to_list(length=None)
+        for r in results:
+            r["member_type"] = m_type
+        all_results.extend(results)
+        
+    total_found = len(all_results)
+    
+    # Sort combined results by name (or created_at if available)
+    all_results.sort(key=lambda x: x.get("name", "").lower())
+    
+    # Apply pagination
+    paginated_results = all_results[skip : skip + limit]
+    
+    members_with_details = []
+    for member in paginated_results:
+        shop = await db.shops.find_one({"id": member["shop_id"]})
+        # Use shared fields since they all have name/phone/shop_id
+        member_data = parse_from_mongo(member)
         if shop:
-            customer_data["shop"] = Shop(**parse_from_mongo(shop)).dict()
+            member_data["shop"] = Shop(**parse_from_mongo(shop)).dict()
             
-        # Enrich with transaction stats
-        # For performance in a real app, this should be an aggregation or stored on customer document
-        # But for this size, we can query.
-        txs = await db.transactions.find({"customer_id": customer["id"], "shop_id": customer["shop_id"]}).sort("date", -1).to_list(length=None)
-        customer_data["total_transactions"] = len(txs)
-        # txs[0]["date"] is already an ISO string in MongoDB, so we use it directly.
-        # If it were a datetime object (from parse_from_mongo), we would need isoformat.
-        # But db.find returns raw dicts.
-        customer_data["last_transaction_date"] = txs[0]["date"] if txs else None
+        # Enrich with transaction stats (for customers mainly)
+        if member["member_type"] == "customer":
+            txs = await db.transactions.find({"customer_id": member["id"], "shop_id": member["shop_id"]}).sort("date", -1).to_list(length=None)
+            member_data["total_transactions"] = len(txs)
+            member_data["last_transaction_date"] = txs[0]["date"] if txs else None
+        else:
+            member_data["total_transactions"] = 0
+            member_data["last_transaction_date"] = None
             
-        customers_with_details.append(customer_data)
+        members_with_details.append(member_data)
     
     total_tx_count = await db.transactions.count_documents({})
 
     return {
-        "customers": customers_with_details,
-        "total": total_count,
+        "customers": members_with_details, # Keep key as "customers" for backward compatibility or change to "members"
+        "total": total_found,
         "total_global_transactions": total_tx_count,
         "skip": skip,
         "limit": limit
