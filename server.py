@@ -146,6 +146,7 @@ class Service(BaseModel):
     phone: str
     nickname: Optional[str] = None
     category: Optional[str] = None # e.g. "Milk Delivery", "Cleaner"
+    upi_id: Optional[str] = None
     service_rate: float = 0.0
     service_rate_type: str = "daily" # 'daily', 'hourly', 'monthly'
     service_daily_hours: Optional[float] = None
@@ -153,6 +154,7 @@ class Service(BaseModel):
     balance: float = 0.0
     is_verified: bool = False
     type: str = "services"
+    payment_direction: str = "payable" # "payable" (I pay them) or "receivable" (They pay me)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Product(BaseModel):
@@ -292,9 +294,11 @@ class ServiceCreateRequest(BaseModel):
     phone: str
     nickname: Optional[str] = None
     category: Optional[str] = None
+    upi_id: Optional[str] = None
     service_rate: float
     service_rate_type: str = "daily"
     service_daily_hours: Optional[float] = None
+    payment_direction: str = "payable"
 
 class ProductCreateRequest(BaseModel):
     name: str
@@ -359,10 +363,12 @@ class ServiceUpdateRequest(BaseModel):
     phone: Optional[str] = None
     nickname: Optional[str] = None
     category: Optional[str] = None
+    upi_id: Optional[str] = None
     service_rate: Optional[float] = None
     service_rate_type: Optional[str] = None
     service_daily_hours: Optional[float] = None
     service_log: Optional[Dict[str, Any]] = None
+    payment_direction: Optional[str] = None
 
 class UserVerifyRequest(BaseModel):
     verified: Optional[bool] = None
@@ -1482,8 +1488,10 @@ async def add_service(shop_id: str, request: ServiceCreateRequest, current_user:
         phone=request.phone,
         nickname=request.nickname,
         category=request.category,
+        upi_id=request.upi_id,
         service_rate=request.service_rate,
         service_rate_type=request.service_rate_type,
+        payment_direction=request.payment_direction,
         is_verified=False
     )
     
